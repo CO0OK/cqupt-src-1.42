@@ -1,0 +1,5 @@
+{
+  "name": "CQUPT-SRC 安全响应中心",
+  "description": "一个功能齐全的校园漏洞响应与产教融合平台，支持漏洞提交、审核、管理、积分商城及用户管理。",
+  "requestFramePermissions": []
+}
