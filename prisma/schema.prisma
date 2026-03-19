@@ -1,0 +1,275 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  auditor
+  user
+}
+
+enum UserStatus {
+  active
+  banned
+  pending
+}
+
+enum VulnerabilitySeverity {
+  critical
+  high
+  medium
+  low
+  info
+}
+
+enum VulnerabilityStatus {
+  pending
+  reviewing
+  approved
+  fixing
+  fixed
+  rejected
+  hidden
+}
+
+enum VulnerabilityAuditAction {
+  submit
+  claim
+  approve
+  reject
+  fixing
+  fixed
+  hide
+  reopen
+}
+
+enum PointChangeType {
+  vuln_reward
+  mall_redeem
+  manual_adjust
+  certificate_bonus
+}
+
+enum AnnouncementType {
+  general
+  security
+  mall
+  maintenance
+}
+
+enum AnnouncementStatus {
+  draft
+  published
+  archived
+}
+
+enum CertificateType {
+  honorary
+  outstanding
+  special
+}
+
+enum CertificateStatus {
+  active
+  revoked
+}
+
+enum ProductStatus {
+  active
+  inactive
+  out_of_stock
+}
+
+enum RedemptionStatus {
+  pending
+  issued
+  cancelled
+}
+
+model User {
+  id                  String   @id @default(uuid()) @db.Uuid
+  username            String   @unique @db.VarChar(50)
+  authCode            String   @unique @map("auth_code") @db.VarChar(50)
+  email               String   @unique @db.VarChar(120)
+  passwordHash        String   @map("password_hash") @db.VarChar(255)
+  role                UserRole
+  points              Int      @default(0)
+  avatarUrl           String?  @map("avatar_url")
+  status              UserStatus @default(active)
+  hasSignedAgreement  Boolean  @default(false) @map("has_signed_agreement")
+  agreementSignedAt   DateTime? @map("agreement_signed_at") @db.Timestamptz(6)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastLoginAt         DateTime? @map("last_login_at") @db.Timestamptz(6)
+
+  submittedVulnerabilities Vulnerability[]      @relation("VulnerabilitySubmitter")
+  auditingVulnerabilities  Vulnerability[]      @relation("VulnerabilityCurrentAuditor")
+  vulnerabilityAudits      VulnerabilityAudit[]
+  pointLogs                UserPointLog[]       @relation("PointLogUser")
+  pointLogsCreated         UserPointLog[]       @relation("PointLogCreatedBy")
+  announcements            Announcement[]
+  certificates             Certificate[]        @relation("CertificateOwner")
+  issuedCertificates       Certificate[]        @relation("CertificateIssuer")
+  redemptions              Redemption[]         @relation("RedemptionUser")
+  issuedRedemptions        Redemption[]         @relation("RedemptionIssuer")
+
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+model Vulnerability {
+  id               String               @id @default(uuid()) @db.Uuid
+  vulnCode         String               @unique @map("vuln_code") @db.VarChar(50)
+  title            String               @db.VarChar(255)
+  targetUrl        String               @map("target_url")
+  vulnType         String               @map("vuln_type") @db.VarChar(50)
+  severity         VulnerabilitySeverity
+  status           VulnerabilityStatus
+  description      String
+  reproductionSteps String?             @map("reproduction_steps")
+  impactScope      String?              @map("impact_scope")
+  submitterId      String               @map("submitter_id") @db.Uuid
+  currentAuditorId String?              @map("current_auditor_id") @db.Uuid
+  rewardPoints     Int                  @default(0) @map("reward_points")
+  submittedAt      DateTime             @map("submitted_at") @db.Timestamptz(6)
+  approvedAt       DateTime?            @map("approved_at") @db.Timestamptz(6)
+  fixedAt          DateTime?            @map("fixed_at") @db.Timestamptz(6)
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  submitter        User                 @relation("VulnerabilitySubmitter", fields: [submitterId], references: [id])
+  currentAuditor   User?                @relation("VulnerabilityCurrentAuditor", fields: [currentAuditorId], references: [id])
+  audits           VulnerabilityAudit[]
+  certificate      Certificate?
+
+  @@index([submitterId])
+  @@index([currentAuditorId])
+  @@index([status])
+  @@index([severity])
+  @@index([submittedAt])
+  @@map("vulnerabilities")
+}
+
+model VulnerabilityAudit {
+  id              String                  @id @default(uuid()) @db.Uuid
+  vulnerabilityId String                  @map("vulnerability_id") @db.Uuid
+  auditorId       String                  @map("auditor_id") @db.Uuid
+  action          VulnerabilityAuditAction
+  fromStatus      VulnerabilityStatus?    @map("from_status")
+  toStatus        VulnerabilityStatus?    @map("to_status")
+  note            String?
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  vulnerability   Vulnerability           @relation(fields: [vulnerabilityId], references: [id])
+  auditor         User                    @relation(fields: [auditorId], references: [id])
+
+  @@index([vulnerabilityId, createdAt])
+  @@index([auditorId, createdAt])
+  @@map("vulnerability_audits")
+}
+
+model UserPointLog {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @map("user_id") @db.Uuid
+  changeType    PointChangeType @map("change_type")
+  delta         Int
+  balanceAfter  Int             @map("balance_after")
+  referenceType String?         @map("reference_type") @db.VarChar(30)
+  referenceId   String?         @map("reference_id") @db.Uuid
+  note          String?
+  createdById   String?         @map("created_by") @db.Uuid
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user          User            @relation("PointLogUser", fields: [userId], references: [id])
+  createdBy     User?           @relation("PointLogCreatedBy", fields: [createdById], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([referenceType, referenceId])
+  @@map("user_point_logs")
+}
+
+model Announcement {
+  id          String             @id @default(uuid()) @db.Uuid
+  title       String             @db.VarChar(255)
+  content     String
+  type        AnnouncementType
+  isPinned    Boolean            @default(false) @map("is_pinned")
+  status      AnnouncementStatus @default(published)
+  authorId    String             @map("author_id") @db.Uuid
+  publishedAt DateTime?          @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  author      User               @relation(fields: [authorId], references: [id])
+
+  @@map("announcements")
+}
+
+model Certificate {
+  id              String            @id @default(uuid()) @db.Uuid
+  certCode        String            @unique @map("cert_code") @db.VarChar(50)
+  userId          String            @map("user_id") @db.Uuid
+  vulnerabilityId String?           @unique @map("vulnerability_id") @db.Uuid
+  title           String            @db.VarChar(255)
+  certType        CertificateType   @map("cert_type")
+  status          CertificateStatus @default(active)
+  issuedById      String            @map("issued_by") @db.Uuid
+  issuedAt        DateTime          @map("issued_at") @db.Timestamptz(6)
+  revokedAt       DateTime?         @map("revoked_at") @db.Timestamptz(6)
+  revokeReason    String?           @map("revoke_reason")
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user            User              @relation("CertificateOwner", fields: [userId], references: [id])
+  vulnerability   Vulnerability?    @relation(fields: [vulnerabilityId], references: [id])
+  issuedBy        User              @relation("CertificateIssuer", fields: [issuedById], references: [id])
+
+  @@map("certificates")
+}
+
+model Product {
+  id          String        @id @default(uuid()) @db.Uuid
+  productCode String        @unique @map("product_code") @db.VarChar(50)
+  name        String        @db.VarChar(120)
+  category    String        @db.VarChar(50)
+  imageUrl    String?       @map("image_url")
+  pointsCost  Int           @map("points_cost")
+  stock       Int
+  status      ProductStatus @default(active)
+  description String?
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  redemptions Redemption[]
+
+  @@map("products")
+}
+
+model Redemption {
+  id             String           @id @default(uuid()) @db.Uuid
+  redemptionCode String           @unique @map("redemption_code") @db.VarChar(50)
+  userId         String           @map("user_id") @db.Uuid
+  productId      String           @map("product_id") @db.Uuid
+  pointsCost     Int              @map("points_cost")
+  quantity       Int              @default(1)
+  status         RedemptionStatus
+  issuedById     String?          @map("issued_by") @db.Uuid
+  issuedAt       DateTime?        @map("issued_at") @db.Timestamptz(6)
+  note           String?
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user           User             @relation("RedemptionUser", fields: [userId], references: [id])
+  product        Product          @relation(fields: [productId], references: [id])
+  issuedBy       User?            @relation("RedemptionIssuer", fields: [issuedById], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([productId])
+  @@index([status])
+  @@map("redemptions")
+}

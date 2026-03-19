@@ -36,6 +36,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    fetch('/api/logout', { method: 'POST' }).catch(() => undefined);
     setUser(null);
     localStorage.removeItem('user');
   };
@@ -46,10 +47,30 @@ export default function App() {
   };
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
+    const bootstrapSession = async () => {
+      const savedUser = localStorage.getItem('user');
+      if (savedUser) {
+        setUser(JSON.parse(savedUser));
+      }
+
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+          setUser(null);
+          localStorage.removeItem('user');
+          return;
+        }
+        const data = await res.json();
+        if (data.success) {
+          setUser(data.user);
+          localStorage.setItem('user', JSON.stringify(data.user));
+        }
+      } catch {
+        // Keep local user if network is temporarily unavailable.
+      }
+    };
+
+    bootstrapSession();
   }, []);
 
   if (!user) {

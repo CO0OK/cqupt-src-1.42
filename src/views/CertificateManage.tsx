@@ -96,6 +96,10 @@ export default function CertificateManage() {
     }
   };
 
+  const handleDownloadCert = (id: string) => {
+    window.open(`/api/certificates/${encodeURIComponent(id)}/pdf`, '_blank');
+  };
+
   const filteredCerts = useMemo(() => {
     const result = certs.filter(c => {
       const searchLower = searchTerm.toLowerCase();
@@ -340,7 +344,11 @@ export default function CertificateManage() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <button className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-xl transition-all" title="下载">
+                      <button
+                        onClick={() => handleDownloadCert(cert.id)}
+                        className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-xl transition-all"
+                        title="下载"
+                      >
                         <Download className="w-4 h-4" />
                       </button>
                       <button 

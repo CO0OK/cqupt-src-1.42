@@ -73,6 +73,10 @@ export default function CertificateSearch({ user }: CertificateSearchProps) {
     }
   };
 
+  const handleDownloadCert = (id: string) => {
+    window.open(`/api/certificates/${encodeURIComponent(id)}/pdf`, '_blank');
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -145,7 +149,10 @@ export default function CertificateSearch({ user }: CertificateSearchProps) {
                   
                   <div className="pt-4 border-t border-gray-50 dark:border-slate-800 flex items-center justify-between">
                     <span className="text-[10px] text-gray-400">{cert.date} 颁发</span>
-                    <button className="p-2 bg-gray-50 dark:bg-slate-800 text-primary-600 rounded-xl hover:bg-primary-50 transition-all">
+                    <button
+                      onClick={() => handleDownloadCert(cert.id)}
+                      className="p-2 bg-gray-50 dark:bg-slate-800 text-primary-600 rounded-xl hover:bg-primary-50 transition-all"
+                    >
                       <Download className="w-4 h-4" />
                     </button>
                   </div>
@@ -249,6 +256,13 @@ export default function CertificateSearch({ user }: CertificateSearchProps) {
                   <div className="pt-8 border-t border-gray-100 dark:border-slate-800 flex justify-center">
                     <div className="text-center">
                       <p className="text-[10px] text-gray-400 mb-2">CQUPT-SRC 校园漏洞响应与产教融合平台</p>
+                      <button
+                        onClick={() => handleDownloadCert(searchResult.id)}
+                        className="mb-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary-600 text-white text-xs font-bold hover:bg-primary-700 transition-all"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        下载证书 PDF
+                      </button>
                       <div className="w-24 h-24 bg-gray-100 dark:bg-slate-800 rounded-xl mx-auto flex items-center justify-center">
                         <span className="text-[10px] text-gray-400">QR Code</span>
                       </div>
