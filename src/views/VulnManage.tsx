@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Vulnerability } from '../types';
-import { Search, Filter, ChevronRight, X, Shield, Globe, AlertTriangle, FileText, CheckCircle, Settings, Clock, EyeOff, Save, Eye } from 'lucide-react';
+import { Search, Filter, ChevronRight, X, Shield, Globe, AlertTriangle, FileText, CheckCircle, Settings, Clock, EyeOff, Save, Eye, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { VULN_TYPES, VULN_LEVELS } from '../constants';
+import { getApiErrorMessage } from '../utils/apiError';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function VulnManage() {
+  type Notice = { type: 'success' | 'error'; message: string } | null;
+  type ConfirmAction =
+    | { kind: 'update_status'; status: string }
+    | { kind: 'save_changes' }
+    | null;
   const [vulns, setVulns] = useState<Vulnerability[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -20,14 +27,34 @@ export default function VulnManage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<Vulnerability>>({});
+  const [notice, setNotice] = useState<Notice>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
+  const canEditVulnerability = (vuln: Vulnerability) => !['待处理', '审核中'].includes(vuln.status);
+  const canPreviewAttachment = (mimeType?: string) =>
+    ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'].includes(mimeType || '');
+
+  const parseError = async (res: Response, fallback: string) => {
+    let data: unknown = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+    return getApiErrorMessage(data, fallback, res.status);
+  };
 
   const fetchVulns = async () => {
     try {
       const res = await fetch('/api/vulnerabilities');
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '获取漏洞列表失败') });
+        return;
+      }
       const data = await res.json();
-      setVulns(data);
+      setVulns(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch vulnerabilities:', err);
+      setNotice({ type: 'error', message: '网络异常，获取漏洞列表失败' });
     }
   };
 
@@ -98,12 +125,16 @@ export default function VulnManage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-      if (res.ok) {
-        fetchVulns();
-        setSelectedVuln(null);
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '更新漏洞状态失败') });
+        return;
       }
+      await fetchVulns();
+      setNotice({ type: 'success', message: `漏洞 ${selectedVuln.id} 状态已更新为「${status}」` });
+      setSelectedVuln(null);
     } catch (err) {
       console.error(err);
+      setNotice({ type: 'error', message: '网络异常，更新漏洞状态失败' });
     } finally {
       setIsSubmitting(false);
     }
@@ -118,13 +149,17 @@ export default function VulnManage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editData),
       });
-      if (res.ok) {
-        fetchVulns();
-        setSelectedVuln(null);
-        setIsEditing(false);
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '保存漏洞修改失败') });
+        return;
       }
+      await fetchVulns();
+      setNotice({ type: 'success', message: `漏洞 ${selectedVuln.id} 已保存修改` });
+      setSelectedVuln(null);
+      setIsEditing(false);
     } catch (err) {
       console.error(err);
+      setNotice({ type: 'error', message: '网络异常，保存漏洞修改失败' });
     } finally {
       setIsSubmitting(false);
     }
@@ -132,6 +167,14 @@ export default function VulnManage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {notice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${notice.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
@@ -181,18 +224,6 @@ export default function VulnManage() {
               <Filter className="w-4 h-4" />
               高级筛选
             </button>
-
-            <select 
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-            >
-              <option value="date_desc">日期降序</option>
-              <option value="date_asc">日期升序</option>
-              <option value="level_desc">等级降序</option>
-              <option value="level_asc">等级升序</option>
-              <option value="status">按状态</option>
-            </select>
           </div>
         </div>
 
@@ -204,7 +235,7 @@ export default function VulnManage() {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50"
             >
-              <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">漏洞状态</label>
                   <select 
@@ -233,6 +264,20 @@ export default function VulnManage() {
                     <option value="高危">高危</option>
                     <option value="中危">中危</option>
                     <option value="低危">低危</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">排序方式</label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="date_desc">日期降序</option>
+                    <option value="date_asc">日期升序</option>
+                    <option value="level_desc">等级降序</option>
+                    <option value="level_asc">等级升序</option>
+                    <option value="status">按状态</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -360,16 +405,25 @@ export default function VulnManage() {
               <div className="p-6 overflow-y-auto space-y-6">
                 <div className="flex justify-end">
                   <button 
-                    onClick={() => setIsEditing(!isEditing)}
+                    onClick={() => {
+                      if (!selectedVuln || !canEditVulnerability(selectedVuln)) return;
+                      setIsEditing(!isEditing);
+                    }}
+                    disabled={!canEditVulnerability(selectedVuln)}
                     className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      isEditing 
+                      !canEditVulnerability(selectedVuln)
+                        ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                        : isEditing 
                         ? 'bg-amber-100 text-amber-700 border border-amber-200' 
                         : 'bg-gray-100 text-gray-700 border border-gray-200'
                     }`}
                   >
-                    {isEditing ? '取消编辑' : '进入编辑模式'}
+                    {!canEditVulnerability(selectedVuln) ? '未审核不可编辑' : isEditing ? '取消编辑' : '进入编辑模式'}
                   </button>
                 </div>
+                {!canEditVulnerability(selectedVuln) ? (
+                  <p className="text-xs text-amber-600 -mt-2">该漏洞尚未审核，当前仅允许状态操作，不可编辑漏洞内容。</p>
+                ) : null}
 
                 {isEditing ? (
                   <div className="space-y-4">
@@ -406,7 +460,7 @@ export default function VulnManage() {
                         <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">危险等级</label>
                         <select 
                           value={editData.level || ''}
-                          onChange={(e) => setEditData({...editData, level: e.target.value})}
+                          onChange={(e) => setEditData({...editData, level: e.target.value as Vulnerability['level']})}
                           className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500"
                         >
                           {VULN_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
@@ -422,8 +476,34 @@ export default function VulnManage() {
                         className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500 resize-none"
                       />
                     </div>
+                    {selectedVuln.attachment ? (
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">附件材料</label>
+                        <div className="p-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-800/60 space-y-2">
+                          <p className="text-xs text-gray-700 dark:text-slate-300">{selectedVuln.attachment}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {canPreviewAttachment(selectedVuln.attachmentType) ? (
+                              <button
+                                type="button"
+                                onClick={() => window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=preview`, '_blank', 'noopener')}
+                                className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg border border-primary-200 text-primary-700 bg-primary-50 hover:bg-primary-100 transition-all inline-flex items-center gap-1"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> 预览
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=download`, '_blank', 'noopener')}
+                              className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-100 transition-all inline-flex items-center gap-1"
+                            >
+                              <Download className="w-3.5 h-3.5" /> 下载
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                     <button 
-                      onClick={handleSaveChanges}
+                      onClick={() => setConfirmAction({ kind: 'save_changes' })}
                       disabled={isSubmitting}
                       className="w-full py-3 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-600/20 hover:bg-primary-700 transition-all flex items-center justify-center gap-2"
                     >
@@ -453,12 +533,38 @@ export default function VulnManage() {
                     </div>
 
                     <div className="space-y-4">
+                      {selectedVuln.attachment ? (
+                        <div className="p-4 rounded-2xl border border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 space-y-2">
+                          <p className="text-xs font-bold text-gray-700 dark:text-slate-300">附件材料</p>
+                          <p className="text-xs text-gray-600 dark:text-slate-400">{selectedVuln.attachment}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {canPreviewAttachment(selectedVuln.attachmentType) ? (
+                              <button
+                                onClick={() => window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=preview`, '_blank', 'noopener')}
+                                className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg border border-primary-200 text-primary-700 bg-primary-50 hover:bg-primary-100 transition-all inline-flex items-center gap-1"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> 安全预览
+                              </button>
+                            ) : (
+                              <span className="px-2.5 py-1.5 text-[11px] rounded-lg border border-amber-200 text-amber-700 bg-amber-50">
+                                不支持在线预览
+                              </span>
+                            )}
+                            <button
+                              onClick={() => window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=download`, '_blank', 'noopener')}
+                              className="px-2.5 py-1.5 text-[11px] font-bold rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-100 transition-all inline-flex items-center gap-1"
+                            >
+                              <Download className="w-3.5 h-3.5" /> 下载附件
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
                       <p className="text-xs font-bold text-gray-700 dark:text-slate-300 flex items-center gap-1">
                         <Clock className="w-4 h-4" /> 流程流转与特殊操作
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <button 
-                          onClick={() => handleUpdateStatus('修复中')}
+                          onClick={() => setConfirmAction({ kind: 'update_status', status: '修复中' })}
                           disabled={isSubmitting || selectedVuln.status === '修复中'}
                           className="p-4 rounded-2xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400 flex flex-col items-center justify-center gap-2 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all group disabled:opacity-50"
                         >
@@ -466,7 +572,7 @@ export default function VulnManage() {
                           <p className="font-bold text-xs">修复中</p>
                         </button>
                         <button 
-                          onClick={() => handleUpdateStatus('已修复')}
+                          onClick={() => setConfirmAction({ kind: 'update_status', status: '已修复' })}
                           disabled={isSubmitting || selectedVuln.status === '已修复'}
                           className="p-4 rounded-2xl border border-emerald-100 dark:border-emerald-900/30 bg-emerald-50/50 dark:bg-emerald-900/10 text-emerald-700 dark:text-emerald-400 flex flex-col items-center justify-center gap-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-all group disabled:opacity-50"
                         >
@@ -474,7 +580,12 @@ export default function VulnManage() {
                           <p className="font-bold text-xs">已修复</p>
                         </button>
                         <button 
-                          onClick={() => handleUpdateStatus(selectedVuln.status === '已隐藏' ? '待处理' : '已隐藏')}
+                          onClick={() =>
+                            setConfirmAction({
+                              kind: 'update_status',
+                              status: selectedVuln.status === '已隐藏' ? '待处理' : '已隐藏',
+                            })
+                          }
                           disabled={isSubmitting}
                           className={`p-4 rounded-2xl border flex flex-col items-center justify-center gap-2 transition-all group ${
                             selectedVuln.status === '已隐藏'
@@ -503,6 +614,38 @@ export default function VulnManage() {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmModal
+        open={!!confirmAction}
+        title={confirmAction?.kind === 'save_changes' ? '确认保存修改' : '确认变更漏洞状态'}
+        description={
+          confirmAction?.kind === 'save_changes'
+            ? '保存后将覆盖当前漏洞信息。'
+            : '变更后将写入漏洞流转记录。'
+        }
+        highlightText={
+          confirmAction?.kind === 'save_changes'
+            ? selectedVuln
+              ? `${selectedVuln.id} · ${selectedVuln.title}`
+              : ''
+            : confirmAction?.kind === 'update_status' && selectedVuln
+              ? `${selectedVuln.id} · ${selectedVuln.status} → ${confirmAction.status}`
+              : ''
+        }
+        confirmText={isSubmitting ? '处理中...' : '确认执行'}
+        confirmDisabled={isSubmitting}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={async () => {
+          if (!confirmAction) return;
+          const action = confirmAction;
+          setConfirmAction(null);
+          if (action.kind === 'save_changes') {
+            await handleSaveChanges();
+            return;
+          }
+          await handleUpdateStatus(action.status);
+        }}
+      />
     </div>
   );
 }

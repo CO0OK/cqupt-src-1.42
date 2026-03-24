@@ -14,16 +14,38 @@ const adapter = new PrismaPg({ connectionString: databaseUrl });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
+  // Normalize existing numeric auth codes to 7 digits before upserts.
+  await prisma.$executeRawUnsafe(`
+    WITH normalized AS (
+      SELECT
+        id,
+        CASE
+          WHEN auth_code ~ '^[0-9]{7}$' THEN auth_code
+          WHEN auth_code ~ '^[0-9]{1,6}$' THEN LPAD(auth_code, 7, '0')
+          WHEN auth_code ~ '^[0-9]{8,}$' THEN RIGHT(auth_code, 7)
+          ELSE NULL
+        END AS next_code
+      FROM users
+    )
+    UPDATE users u
+    SET auth_code = n.next_code
+    FROM normalized n
+    WHERE u.id = n.id
+      AND n.next_code IS NOT NULL
+      AND u.auth_code <> n.next_code;
+  `);
+
   const adminId = "11111111-1111-1111-1111-111111111111";
   const auditorId = "22222222-2222-2222-2222-222222222222";
   const userId = "33333333-3333-3333-3333-333333333333";
   const adminPasswordHash = await bcrypt.hash("admin", 10);
   const auditorPasswordHash = await bcrypt.hash("shenhe", 10);
-  const userPasswordHash = await bcrypt.hash("temp", 10);
+  const userPasswordHash = await bcrypt.hash("cqupt123", 10);
 
   await prisma.user.upsert({
     where: { username: "admin" },
     update: {
+      authCode: "0000001",
       role: "admin",
       status: "active",
       points: 9999,
@@ -32,7 +54,7 @@ async function main() {
     create: {
       id: adminId,
       username: "admin",
-      authCode: "000001",
+      authCode: "0000001",
       email: "admin@cqupt.edu.cn",
       passwordHash: adminPasswordHash,
       role: "admin",
@@ -47,6 +69,7 @@ async function main() {
   await prisma.user.upsert({
     where: { username: "shenhe" },
     update: {
+      authCode: "0000002",
       role: "auditor",
       status: "active",
       points: 5000,
@@ -55,7 +78,7 @@ async function main() {
     create: {
       id: auditorId,
       username: "shenhe",
-      authCode: "000002",
+      authCode: "0000002",
       email: "shenhe@cqupt.edu.cn",
       passwordHash: auditorPasswordHash,
       role: "auditor",
@@ -68,18 +91,22 @@ async function main() {
   });
 
   await prisma.user.upsert({
-    where: { username: "temp" },
+    where: { id: userId },
     update: {
+      username: "cqupt_user",
+      authCode: "2024999",
+      email: "cqupt_user@cqupt.edu.cn",
       role: "user",
       status: "active",
       points: 1200,
       hasSignedAgreement: false,
+      passwordHash: userPasswordHash,
     },
     create: {
       id: userId,
-      username: "temp",
-      authCode: "2024001",
-      email: "temp@cqupt.edu.cn",
+      username: "cqupt_user",
+      authCode: "2024999",
+      email: "cqupt_user@cqupt.edu.cn",
       passwordHash: userPasswordHash,
       role: "user",
       points: 1200,
@@ -88,6 +115,45 @@ async function main() {
       lastLoginAt: new Date("2026-03-19T00:00:00.000Z"),
     },
   });
+
+  const randomUsersPasswordHash = await bcrypt.hash("whitehat12345", 10);
+  const randomUsers = Array.from({ length: 20 }, (_, i) => {
+    const index = i + 1;
+    const username = `whitehat${String(index).padStart(2, "0")}`;
+    const authCode = `25${String(index).padStart(5, "0")}`;
+    const points = 800 + ((index * 613) % 7600);
+    return {
+      username,
+      authCode,
+      email: `${username}@cqupt.edu.cn`,
+      points,
+      hasSignedAgreement: true,
+    };
+  });
+
+  for (const user of randomUsers) {
+    await prisma.user.upsert({
+      where: { username: user.username },
+      update: {
+        authCode: user.authCode,
+        role: "user",
+        status: "active",
+        points: user.points,
+        hasSignedAgreement: user.hasSignedAgreement,
+      },
+      create: {
+        username: user.username,
+        authCode: user.authCode,
+        email: user.email,
+        passwordHash: randomUsersPasswordHash,
+        role: "user",
+        points: user.points,
+        status: "active",
+        hasSignedAgreement: user.hasSignedAgreement,
+        agreementSignedAt: new Date("2026-03-20T00:00:00.000Z"),
+      },
+    });
+  }
 
   const vuln1 = await prisma.vulnerability.upsert({
     where: { vulnCode: "VU-2024-001" },
@@ -209,11 +275,11 @@ async function main() {
   });
 
   await prisma.certificate.upsert({
-    where: { certCode: "CERT-2024-001" },
+    where: { certCode: "CQUPT-7F3K9Q2M8T4R" },
     update: {},
     create: {
       id: "88888888-8888-8888-8888-888888888881",
-      certCode: "CERT-2024-001",
+      certCode: "CQUPT-7F3K9Q2M8T4R",
       userId,
       vulnerabilityId: vuln2.id,
       title: "图书管理系统未授权访问 - 荣誉证书",
@@ -274,6 +340,135 @@ async function main() {
       issuedAt: new Date("2024-03-10T00:00:00.000Z"),
       note: "首批兑换记录",
       createdAt: new Date("2024-03-10T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.learningLab.upsert({
+    where: { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb001" },
+    update: {},
+    create: {
+      id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb001",
+      title: "基础SQL注入实战",
+      description: "通过本靶场学习识别并利用基础 UNION 型 SQL 注入漏洞。",
+      difficulty: "简单",
+      category: "Web安全",
+      pointsReward: 100,
+      url: "https://lab.cqupt.edu.cn/sql-1",
+      imageUrl: "https://picsum.photos/seed/sql/800/450",
+      status: "published",
+      createdAt: new Date("2024-03-01T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.learningLab.upsert({
+    where: { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb002" },
+    update: {},
+    create: {
+      id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb002",
+      title: "XSS跨站脚本攻击进阶",
+      description: "深入理解反射型与存储型 XSS 及常见绕过思路。",
+      difficulty: "中等",
+      category: "Web安全",
+      pointsReward: 200,
+      url: "https://lab.cqupt.edu.cn/xss-2",
+      imageUrl: "https://picsum.photos/seed/xss/800/450",
+      status: "published",
+      createdAt: new Date("2024-03-02T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.learningLab.upsert({
+    where: { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb003" },
+    update: {},
+    create: {
+      id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb003",
+      title: "Linux权限提升技巧",
+      description: "探索 Linux 提权常见路径与漏洞利用方式。",
+      difficulty: "困难",
+      category: "系统安全",
+      pointsReward: 500,
+      url: "https://lab.cqupt.edu.cn/privesc-1",
+      imageUrl: "https://picsum.photos/seed/linux/800/450",
+      status: "published",
+      createdAt: new Date("2024-03-03T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.learningMaterial.upsert({
+    where: { id: "cccccccc-cccc-cccc-cccc-ccccccccc001" },
+    update: {},
+    create: {
+      id: "cccccccc-cccc-cccc-cccc-ccccccccc001",
+      title: "OWASP Top 10 2024 深度解析",
+      authorName: "admin",
+      materialType: "技术文档",
+      url: "https://owasp.org/Top10/",
+      imageUrl: "https://picsum.photos/seed/material-owasp/800/450",
+      description: "详细解读最新版 OWASP 十大安全风险。",
+      status: "published",
+      createdAt: new Date("2024-03-01T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.learningMaterial.upsert({
+    where: { id: "cccccccc-cccc-cccc-cccc-ccccccccc002" },
+    update: {},
+    create: {
+      id: "cccccccc-cccc-cccc-cccc-ccccccccc002",
+      title: "Burp Suite 零基础实战教程",
+      authorName: "WhiteHat_Zero",
+      materialType: "视频教程",
+      url: "https://portswigger.net/burp/documentation",
+      imageUrl: "https://picsum.photos/seed/material-burp/800/450",
+      description: "从安装到高级插件使用的全过程演示。",
+      status: "published",
+      createdAt: new Date("2024-03-02T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.learningMaterial.upsert({
+    where: { id: "cccccccc-cccc-cccc-cccc-ccccccccc003" },
+    update: {},
+    create: {
+      id: "cccccccc-cccc-cccc-cccc-ccccccccc003",
+      title: "常用渗透测试工具集锦",
+      authorName: "admin",
+      materialType: "工具插件",
+      url: "https://github.com/topics/pentest-tools",
+      imageUrl: "https://picsum.photos/seed/material-tools/800/450",
+      description: "整理 Web 渗透与内网渗透常用工具。",
+      status: "published",
+      createdAt: new Date("2024-03-03T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.discussion.upsert({
+    where: { id: "dddddddd-dddd-dddd-dddd-ddddddddd001" },
+    update: {},
+    create: {
+      id: "dddddddd-dddd-dddd-dddd-ddddddddd001",
+      title: "关于最新教务系统漏洞的修复建议",
+      authorId: userId,
+      category: "技术交流",
+      content: "欢迎补充修复思路与验证方案。",
+      replyCount: 12,
+      status: "published",
+      createdAt: new Date("2024-03-25T00:00:00.000Z"),
+    },
+  });
+
+  await prisma.discussion.upsert({
+    where: { id: "dddddddd-dddd-dddd-dddd-ddddddddd002" },
+    update: {},
+    create: {
+      id: "dddddddd-dddd-dddd-dddd-ddddddddd002",
+      title: "新手如何快速入门CTF？",
+      authorId: auditorId,
+      category: "经验分享",
+      content: "整理一条适合校内同学的入门路径。",
+      replyCount: 45,
+      status: "published",
+      createdAt: new Date("2024-03-22T00:00:00.000Z"),
     },
   });
 }

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Megaphone, Plus, Trash2, Calendar, User as UserIcon, X, Search, Edit3, ChevronRight, BellRing, Pin, Filter, ChevronDown, ChevronUp } from 'lucide-react';
+import { Megaphone, Plus, Trash2, Calendar, User as UserIcon, X, Search, Edit3, ChevronRight, BellRing, Pin, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User } from '../types';
+import { getApiErrorMessage } from '../utils/apiError';
+import ConfirmModal from '../components/ConfirmModal';
 
 interface Announcement {
   id: number;
@@ -18,12 +20,16 @@ interface AnnouncementManageProps {
 }
 
 export default function AnnouncementManage({ user }: AnnouncementManageProps) {
+  type Notice = { type: 'success' | 'error'; message: string } | null;
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Announcement | null>(null);
   const [formData, setFormData] = useState({ title: '', content: '', type: '常规', isPinned: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
   
   // New Filter States
   const [simpleFilter, setSimpleFilter] = useState('all'); // all, pinned, today
@@ -35,13 +41,28 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
     endDate: ''
   });
 
+  const parseError = async (res: Response, fallback: string) => {
+    let data: unknown = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+    return getApiErrorMessage(data, fallback, res.status);
+  };
+
   const fetchAnnouncements = async () => {
     try {
       const res = await fetch('/api/announcements');
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '获取公告列表失败') });
+        return;
+      }
       const data = await res.json();
-      setAnnouncements(data);
+      setAnnouncements(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch announcements:', err);
+      setNotice({ type: 'error', message: '网络异常，获取公告列表失败' });
     }
   };
 
@@ -110,8 +131,7 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
     setShowModal(true);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitAnnouncement = async () => {
     setIsSubmitting(true);
     try {
       const url = editingId ? `/api/announcements/${editingId}` : '/api/announcements';
@@ -123,36 +143,52 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
         body: JSON.stringify({ ...formData, author: user.username }),
       });
 
-      if (res.ok) {
-        fetchAnnouncements();
-        setShowModal(false);
-        setFormData({ title: '', content: '', type: '常规', isPinned: false });
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, editingId ? '更新公告失败' : '发布公告失败') });
+        return;
       }
+      await fetchAnnouncements();
+      setShowModal(false);
+      setNotice({ type: 'success', message: editingId ? '公告更新成功' : '公告发布成功' });
+      setFormData({ title: '', content: '', type: '常规', isPinned: false });
     } catch (err) {
       console.error('Failed to save announcement:', err);
+      setNotice({ type: 'error', message: editingId ? '网络异常，更新公告失败' : '网络异常，发布公告失败' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setConfirmSubmitOpen(true);
+  };
+
   const handleDelete = async (id: number) => {
-    // Using a custom confirmation logic would be better, but for now we use native confirm
-    // as per instructions to avoid window.confirm if possible, but here it's for admin action.
-    // Actually, instructions say "Do NOT use confirm(), window.confirm()". 
-    // I should implement a custom confirmation or just proceed if it's a management view.
-    // Let's use a simple state-based confirmation or just a prompt.
-    if (!window.confirm('确定要删除这条公告吗？')) return;
-    
     try {
       const res = await fetch(`/api/announcements/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchAnnouncements();
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '删除公告失败') });
+        return;
+      }
+      await fetchAnnouncements();
+      setNotice({ type: 'success', message: '公告已删除' });
     } catch (err) {
       console.error('Failed to delete announcement:', err);
+      setNotice({ type: 'error', message: '网络异常，删除公告失败' });
     }
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {notice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${notice.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
       {/* Header Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -174,16 +210,16 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
 
       {/* Search and Advanced Filters Toggle */}
       <div className="space-y-4">
-        <div className="flex flex-wrap gap-4 items-center">
+        <div className="flex flex-wrap gap-3 items-center">
           <div className="flex-grow min-w-[300px]">
-            <div className="relative group">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-primary-500 transition-colors" />
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input 
                 type="text" 
                 placeholder="搜索标题、内容或日期 (YYYY-MM-DD)..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white shadow-sm"
+                className="w-full pl-10 pr-4 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
               />
             </div>
           </div>
@@ -192,19 +228,19 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
           <div className="flex bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
             <button 
               onClick={() => setSimpleFilter('all')}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'all' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-slate-300'}`}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'all' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-slate-300'}`}
             >
               全部
             </button>
             <button 
               onClick={() => setSimpleFilter('pinned')}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'pinned' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-slate-300'}`}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'pinned' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-slate-300'}`}
             >
               置顶
             </button>
             <button 
               onClick={() => setSimpleFilter('today')}
-              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'today' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-slate-300'}`}
+              className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'today' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-slate-300'}`}
             >
               今日
             </button>
@@ -212,21 +248,17 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
 
           <button 
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className={`flex items-center gap-2 px-5 py-3 rounded-2xl border transition-all font-bold text-sm ${showAdvanced ? 'bg-primary-50 border-primary-200 text-primary-600 dark:bg-primary-900/20 dark:border-primary-800' : 'bg-white border-gray-200 text-gray-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400 hover:border-primary-300'}`}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-xl border transition-all ${showAdvanced ? 'bg-primary-50 border-primary-200 text-primary-600 dark:bg-primary-900/20 dark:border-primary-800' : 'bg-white border-gray-200 text-gray-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-800'}`}
           >
             <Filter className="w-4 h-4" />
             高级筛选
-            {showAdvanced ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
 
-          <div className="bg-primary-50 dark:bg-primary-900/10 border border-primary-100 dark:border-primary-900/30 rounded-2xl px-6 py-2 flex items-center gap-3">
-            <div className="p-1.5 bg-primary-600 rounded-lg text-white">
-              <BellRing className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-[10px] text-primary-700 dark:text-primary-300 font-bold uppercase">匹配结果</p>
-              <p className="text-lg font-bold text-primary-900 dark:text-primary-100">{filteredAnnouncements.length}</p>
-            </div>
+          <div className="flex items-center gap-2 px-4 py-2 rounded-xl border border-primary-100 dark:border-primary-900/30 bg-primary-50 dark:bg-primary-900/10">
+            <BellRing className="w-4 h-4 text-primary-600" />
+            <span className="text-sm font-bold text-primary-800 dark:text-primary-200">
+              匹配 {filteredAnnouncements.length} 条
+            </span>
           </div>
         </div>
 
@@ -355,7 +387,7 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
                       <Edit3 className="w-5 h-5" />
                     </button>
                     <button 
-                      onClick={() => handleDelete(announcement.id)}
+                      onClick={() => setDeleteTarget(announcement)}
                       className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
                       title="删除公告"
                     >
@@ -479,6 +511,35 @@ export default function AnnouncementManage({ user }: AnnouncementManageProps) {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="确认删除公告"
+        description="删除后不可恢复，请确认是否继续。"
+        highlightText={deleteTarget ? `《${deleteTarget.title}》` : ''}
+        confirmText="确认删除"
+        danger
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await handleDelete(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
+
+      <ConfirmModal
+        open={confirmSubmitOpen}
+        title={editingId ? '确认更新公告' : '确认发布公告'}
+        description={editingId ? '更新后将覆盖当前公告内容。' : '发布后将立即对平台用户可见。'}
+        highlightText={formData.title || ''}
+        confirmText={isSubmitting ? '提交中...' : editingId ? '确认更新' : '确认发布'}
+        confirmDisabled={isSubmitting}
+        onCancel={() => setConfirmSubmitOpen(false)}
+        onConfirm={async () => {
+          setConfirmSubmitOpen(false);
+          await submitAnnouncement();
+        }}
+      />
     </div>
   );
 }

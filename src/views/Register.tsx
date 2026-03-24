@@ -2,6 +2,8 @@ import React, { useState, useRef } from 'react';
 import { ShieldAlert, User as UserIcon, Fingerprint, Mail, Lock, Eye, EyeOff, X, CheckCircle } from 'lucide-react';
 import SliderCaptcha from '../components/SliderCaptcha';
 import { motion, AnimatePresence } from 'motion/react';
+import { getApiErrorMessage } from '../utils/apiError';
+import { PASSWORD_POLICY_HINT, validatePasswordPolicyText } from '../utils/passwordPolicy';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;
@@ -14,15 +16,19 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
     username: '',
     authCode: '',
     email: '',
+    emailCode: '',
     password: '',
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [emailCodeTip, setEmailCodeTip] = useState('');
   const [success, setSuccess] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [showAgreement, setShowAgreement] = useState(false);
   const [hasReadToBottom, setHasReadToBottom] = useState(false);
   const [agreementAccepted, setAgreementAccepted] = useState(false);
+  const [isSendingEmailCode, setIsSendingEmailCode] = useState(false);
+  const [emailCodeCountdown, setEmailCodeCountdown] = useState(0);
   const agreementContentRef = useRef<HTMLDivElement>(null);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -32,10 +38,60 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
     }
   };
 
+  React.useEffect(() => {
+    if (emailCodeCountdown <= 0) return;
+    const timer = window.setInterval(() => {
+      setEmailCodeCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [emailCodeCountdown]);
+
+  const handleSendEmailCode = async () => {
+    const email = formData.email.trim();
+    if (!email) {
+      setError('请先输入邮箱');
+      return;
+    }
+
+    setError('');
+    setEmailCodeTip('');
+    setIsSendingEmailCode(true);
+    try {
+      const response = await fetch('/api/auth/email-code/register/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) {
+        setError(getApiErrorMessage(data, '验证码发送失败，请稍后再试', response.status));
+        return;
+      }
+      setEmailCodeCountdown(typeof data.cooldownInSec === 'number' ? data.cooldownInSec : 60);
+      if (typeof data.devCode === 'string') {
+        setEmailCodeTip(`开发环境验证码：${data.devCode}`);
+      }
+    } catch {
+      setEmailCodeTip('');
+      setError('验证码发送失败，请稍后再试');
+    } finally {
+      setIsSendingEmailCode(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!agreementAccepted) {
       setError('请先阅读并同意用户协议');
+      return;
+    }
+    if (!/^\d{7}$/.test(formData.authCode.trim())) {
+      setError('统一认证码需为7位数字');
+      return;
+    }
+    const passwordIssue = validatePasswordPolicyText(formData.password);
+    if (passwordIssue) {
+      setError(passwordIssue);
       return;
     }
     if (!isVerified) {
@@ -54,7 +110,7 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
         setSuccess(true);
         setTimeout(onSwitchToLogin, 2000);
       } else {
-        setError(data.message);
+        setError(getApiErrorMessage(data, '注册失败，请稍后再试', response.status));
       }
     } catch (err) {
       setError('注册失败，请稍后再试');
@@ -93,6 +149,12 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
           </div>
         )}
 
+        {emailCodeTip && (
+          <div className="mb-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300 text-sm text-center">
+            {emailCodeTip}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">用户名</label>
@@ -120,9 +182,10 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
               <input 
                 type="text" 
                 required 
+                maxLength={7}
                 value={formData.authCode}
-                onChange={(e) => setFormData({...formData, authCode: e.target.value})}
-                placeholder="请输入学号或工号" 
+                onChange={(e) => setFormData({...formData, authCode: e.target.value.replace(/\D/g, '').slice(0, 7)})}
+                placeholder="请输入7位统一认证码" 
                 className="w-full pl-11 pr-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
               />
             </div>
@@ -142,6 +205,29 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
                 placeholder="example@cqupt.edu.cn" 
                 className="w-full pl-11 pr-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
               />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">邮箱验证码</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                required
+                maxLength={6}
+                value={formData.emailCode}
+                onChange={(e) => setFormData({ ...formData, emailCode: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                placeholder="请输入6位验证码"
+                className="flex-1 px-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+              />
+              <button
+                type="button"
+                onClick={handleSendEmailCode}
+                disabled={isSendingEmailCode || emailCodeCountdown > 0}
+                className="px-4 py-2.5 rounded-xl text-sm font-bold bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {emailCodeCountdown > 0 ? `${emailCodeCountdown}s` : (isSendingEmailCode ? '发送中...' : '发送验证码')}
+              </button>
             </div>
           </div>
 
@@ -167,6 +253,7 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
+            <p className="text-xs text-gray-500 dark:text-slate-400 ml-1">{PASSWORD_POLICY_HINT}</p>
           </div>
 
           <div className="flex items-center gap-2 px-1">

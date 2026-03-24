@@ -1,8 +1,102 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { User } from '../types';
 import { ShieldCheck, TrendingUp, Zap, Users, CheckCircle } from 'lucide-react';
 
 export default function Home({ user, setActiveTab }: { user: User, setActiveTab: (tab: string) => void }) {
+  const [activeWhitehatCount, setActiveWhitehatCount] = useState<number | null>(null);
+  const [totalVulnCount, setTotalVulnCount] = useState<number | null>(null);
+  const [fixedVulnCount, setFixedVulnCount] = useState<number | null>(null);
+  const [vulnRows, setVulnRows] = useState<Array<{
+    id: string;
+    author: string;
+    type: string;
+    level: string;
+    status: string;
+    description: string;
+  }>>([]);
+
+  useEffect(() => {
+    const fetchHomeStats = async () => {
+      try {
+        const vulnRes = await fetch('/api/vulnerabilities');
+        const vulnData = await vulnRes.json();
+        if (vulnRes.ok && Array.isArray(vulnData)) {
+          setTotalVulnCount(vulnData.length);
+          setFixedVulnCount(vulnData.filter((v: { status?: string }) => v.status === '已修复').length);
+          setVulnRows(vulnData);
+        }
+
+        if (user.role === 'admin') {
+          const res = await fetch('/api/users');
+          const data = await res.json();
+          if (!res.ok || !Array.isArray(data)) return;
+          const count = data.filter((u: User) => u.role === 'user' && u.status === 'Active').length;
+          setActiveWhitehatCount(count);
+          return;
+        }
+
+        const res = await fetch('/api/users/leaderboard?limit=100');
+        const data = await res.json();
+        if (!res.ok || !Array.isArray(data?.leaderboard)) return;
+        setActiveWhitehatCount(data.leaderboard.length);
+      } catch (error) {
+        console.error('Failed to fetch active whitehat stats:', error);
+      }
+    };
+
+    fetchHomeStats();
+  }, [user.role]);
+
+  const radarMetrics = useMemo(() => {
+    const rows = (user.role === 'user'
+      ? vulnRows.filter((v) => v.author === user.username)
+      : vulnRows) as Array<{
+      author: string;
+      type: string;
+      level: string;
+      status: string;
+      description: string;
+    }>;
+
+    const total = rows.length;
+    if (total === 0) {
+      return [
+        { label: '漏洞覆盖', value: 0 },
+        { label: '高危识别', value: 0 },
+        { label: '修复闭环', value: 0 },
+        { label: '类型广度', value: 0 },
+        { label: '响应效率', value: 0 },
+        { label: '报告完整', value: 0 },
+      ];
+    }
+
+    const highCount = rows.filter((v) => v.level === '严重' || v.level === '高危').length;
+    const fixedCount = rows.filter((v) => v.status === '已修复').length;
+    const pendingCount = rows.filter((v) => v.status === '待处理' || v.status === '审核中').length;
+    const detailCount = rows.filter((v) => (v.description || '').trim().length >= 40).length;
+    const uniqueTypeCount = new Set(rows.map((v) => v.type)).size;
+
+    const coverageBaseline = user.role === 'user' ? 10 : 40;
+    const typeBaseline = user.role === 'user' ? 5 : 8;
+    const clamp = (val: number) => Math.max(0, Math.min(100, Math.round(val)));
+
+    return [
+      { label: '漏洞覆盖', value: clamp((total / coverageBaseline) * 100) },
+      { label: '高危识别', value: clamp((highCount / total) * 100) },
+      { label: '修复闭环', value: clamp((fixedCount / total) * 100) },
+      { label: '类型广度', value: clamp((uniqueTypeCount / typeBaseline) * 100) },
+      { label: '响应效率', value: clamp(((total - pendingCount) / total) * 100) },
+      { label: '报告完整', value: clamp((detailCount / total) * 100) },
+    ];
+  }, [user.role, user.username, vulnRows]);
+
+  const radarSummary = useMemo(() => {
+    const avg = radarMetrics.reduce((sum, item) => sum + item.value, 0) / radarMetrics.length;
+    if (avg >= 75) return '综合态势优秀，当前安全运营质量稳定。';
+    if (avg >= 50) return '整体表现良好，建议持续提升闭环与效率。';
+    return '基础能力有提升空间，建议优先优化高危处置与修复节奏。';
+  }, [radarMetrics]);
+
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Welcome Hero */}
@@ -30,7 +124,7 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           title="总漏洞数" 
-          value="1,284" 
+          value={totalVulnCount === null ? '...' : totalVulnCount.toLocaleString()} 
           icon={TrendingUp} 
           color="text-primary-600" 
           bg="bg-primary-50 dark:bg-primary-900/20" 
@@ -38,7 +132,7 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
         />
         <StatCard 
           title="已修复" 
-          value="956" 
+          value={fixedVulnCount === null ? '...' : fixedVulnCount.toLocaleString()} 
           icon={CheckCircle} 
           color="text-emerald-600" 
           bg="bg-emerald-50 dark:bg-emerald-900/20" 
@@ -54,7 +148,7 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
         />
         <StatCard 
           title="活跃白帽" 
-          value="342" 
+          value={activeWhitehatCount === null ? '...' : activeWhitehatCount.toLocaleString()} 
           icon={Users} 
           color="text-primary-600" 
           bg="bg-primary-50 dark:bg-primary-900/20" 
@@ -74,23 +168,13 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
           </div>
         </div>
 
-        {/* Skill Radar Mock */}
+        {/* Skill Radar */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm flex flex-col items-center">
-          <h3 className="font-bold text-lg mb-6 w-full text-left text-gray-900 dark:text-white">白帽技能雷达</h3>
-          <div className="relative w-48 h-48 mt-4">
-            <svg viewBox="0 0 100 100" className="w-full h-full">
-              <polygon points="50,5 93,30 93,80 50,105 7,80 7,30" fill="none" stroke="currentColor" className="text-gray-200 dark:text-slate-800" strokeWidth="1" />
-              <polygon points="50,25 71,37 71,62 50,75 29,62 29,37" fill="none" stroke="currentColor" className="text-gray-200 dark:text-slate-800" strokeWidth="1" />
-              <polygon points="50,15 80,40 70,70 50,90 30,70 20,40" fill="rgba(0, 102, 51, 0.2)" stroke="#006633" strokeWidth="2" />
-            </svg>
-            <span className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-4 text-[10px] font-bold text-gray-500">Web安全</span>
-            <span className="absolute top-1/4 -right-10 text-[10px] font-bold text-gray-500">渗透测试</span>
-            <span className="absolute bottom-1/4 -right-8 text-[10px] font-bold text-gray-500">二进制</span>
-            <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] font-bold text-gray-500">移动端</span>
-            <span className="absolute bottom-1/4 -left-8 text-[10px] font-bold text-gray-500">IoT</span>
-            <span className="absolute top-1/4 -left-10 text-[10px] font-bold text-gray-500">逻辑漏洞</span>
-          </div>
-          <p className="text-sm text-gray-500 mt-10 text-center italic">"全能型选手，Web端表现尤为卓越"</p>
+          <h3 className="font-bold text-lg mb-6 w-full text-left text-gray-900 dark:text-white">
+            {user.role === 'user' ? '我的漏洞分析雷达' : '总体漏洞分析雷达'}
+          </h3>
+          <RadarChart metrics={radarMetrics} />
+          <p className="text-sm text-gray-500 mt-8 text-center italic">"{radarSummary}"</p>
         </div>
       </div>
     </div>
@@ -124,6 +208,64 @@ function ProgressBar({ label, percent, color }: any) {
       <div className="w-full bg-gray-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
         <div className={`${color} h-full rounded-full transition-all duration-1000`} style={{ width: `${percent}%` }}></div>
       </div>
+    </div>
+  );
+}
+
+function RadarChart({ metrics }: { metrics: Array<{ label: string; value: number }> }) {
+  const center = 80;
+  const radius = 62;
+  const points = metrics
+    .map((metric, idx) => {
+      const angle = (Math.PI * 2 * idx) / metrics.length - Math.PI / 2;
+      const r = (radius * metric.value) / 100;
+      const x = center + Math.cos(angle) * r;
+      const y = center + Math.sin(angle) * r;
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  const ring = [1, 0.75, 0.5, 0.25].map((scale) =>
+    metrics
+      .map((_, idx) => {
+        const angle = (Math.PI * 2 * idx) / metrics.length - Math.PI / 2;
+        const x = center + Math.cos(angle) * radius * scale;
+        const y = center + Math.sin(angle) * radius * scale;
+        return `${x},${y}`;
+      })
+      .join(' '),
+  );
+
+  const labelPos = metrics.map((metric, idx) => {
+    const angle = (Math.PI * 2 * idx) / metrics.length - Math.PI / 2;
+    const x = center + Math.cos(angle) * (radius + 20);
+    const y = center + Math.sin(angle) * (radius + 20);
+    return { ...metric, x, y };
+  });
+
+  return (
+    <div className="relative w-[260px] h-[260px]">
+      <svg viewBox="0 0 160 160" className="w-full h-full">
+        {ring.map((pts, idx) => (
+          <polygon key={idx} points={pts} fill="none" stroke="currentColor" className="text-gray-200 dark:text-slate-800" strokeWidth="1" />
+        ))}
+        {metrics.map((_, idx) => {
+          const angle = (Math.PI * 2 * idx) / metrics.length - Math.PI / 2;
+          const x = center + Math.cos(angle) * radius;
+          const y = center + Math.sin(angle) * radius;
+          return <line key={idx} x1={center} y1={center} x2={x} y2={y} stroke="currentColor" className="text-gray-200 dark:text-slate-800" strokeWidth="1" />;
+        })}
+        <polygon points={points} fill="rgba(0, 102, 51, 0.2)" stroke="#006633" strokeWidth="2" />
+      </svg>
+      {labelPos.map((item, idx) => (
+        <div
+          key={idx}
+          className="absolute text-[10px] font-bold text-gray-500 whitespace-nowrap -translate-x-1/2 -translate-y-1/2"
+          style={{ left: `${(item.x / 160) * 100}%`, top: `${(item.y / 160) * 100}%` }}
+        >
+          {item.label}
+        </div>
+      ))}
     </div>
   );
 }

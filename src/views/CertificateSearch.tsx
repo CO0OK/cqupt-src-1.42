@@ -77,6 +77,10 @@ export default function CertificateSearch({ user }: CertificateSearchProps) {
     window.open(`/api/certificates/${encodeURIComponent(id)}/pdf`, '_blank');
   };
 
+  const handlePreviewCert = (id: string) => {
+    window.open(`/api/certificates/${encodeURIComponent(id)}/pdf?mode=preview`, '_blank');
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -149,12 +153,22 @@ export default function CertificateSearch({ user }: CertificateSearchProps) {
                   
                   <div className="pt-4 border-t border-gray-50 dark:border-slate-800 flex items-center justify-between">
                     <span className="text-[10px] text-gray-400">{cert.date} 颁发</span>
-                    <button
-                      onClick={() => handleDownloadCert(cert.id)}
-                      className="p-2 bg-gray-50 dark:bg-slate-800 text-primary-600 rounded-xl hover:bg-primary-50 transition-all"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handlePreviewCert(cert.id)}
+                        className="px-2.5 py-1 text-xs font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-all"
+                        title="预览证书"
+                      >
+                        预览
+                      </button>
+                      <button
+                        onClick={() => handleDownloadCert(cert.id)}
+                        className="p-2 bg-gray-50 dark:bg-slate-800 text-primary-600 rounded-xl hover:bg-primary-50 transition-all"
+                        title="下载证书"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -183,7 +197,7 @@ export default function CertificateSearch({ user }: CertificateSearchProps) {
                       <Award className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                       <input 
                         type="text" 
-                        placeholder="例如: CERT-2024-001"
+                        placeholder="例如: CQUPT-7F3K9Q2M8T4R"
                         value={searchId}
                         onChange={(e) => setSearchId(e.target.value)}
                         className="w-full pl-12 pr-4 py-3.5 bg-gray-50 dark:bg-slate-800 border-none rounded-2xl text-sm focus:ring-2 focus:ring-primary-500 outline-none dark:text-white"
@@ -256,6 +270,13 @@ export default function CertificateSearch({ user }: CertificateSearchProps) {
                   <div className="pt-8 border-t border-gray-100 dark:border-slate-800 flex justify-center">
                     <div className="text-center">
                       <p className="text-[10px] text-gray-400 mb-2">CQUPT-SRC 校园漏洞响应与产教融合平台</p>
+                      <button
+                        onClick={() => handlePreviewCert(searchResult.id)}
+                        className="mb-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 transition-all"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        预览证书 PDF
+                      </button>
                       <button
                         onClick={() => handleDownloadCert(searchResult.id)}
                         className="mb-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary-600 text-white text-xs font-bold hover:bg-primary-700 transition-all"

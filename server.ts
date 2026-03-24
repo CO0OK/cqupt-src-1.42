@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import express from "express";
 import { existsSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
@@ -10,6 +11,30 @@ import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import PDFDocument from "pdfkit";
+import { sendError } from "./src/server/shared/errors.ts";
+import {
+  buildAuthUser,
+  createRequireAuth,
+  createRequireRoles,
+  getRequestAuthUser,
+  type AuthRole,
+} from "./src/server/middlewares/auth.ts";
+import { createAnnouncementsRouter } from "./src/server/modules/announcements/announcements.routes.ts";
+import { createLearningRouter } from "./src/server/modules/learning/learning.routes.ts";
+import { createMallRouter } from "./src/server/modules/mall/mall.routes.ts";
+import { createUsersRouter } from "./src/server/modules/users/users.routes.ts";
+import { createVulnerabilitiesRouter } from "./src/server/modules/vulnerabilities/vulnerabilities.routes.ts";
+import {
+  ConsoleEmailCodeSender,
+  EmailCodesService,
+  MemoryEmailCodeStore,
+  RedisEmailCodeStore,
+  SmtpEmailCodeSender,
+  type EmailCodeSender,
+  type EmailCodeStore,
+} from "./src/server/modules/email-codes/email-codes.service.ts";
+import { buildRequestLogMeta, writeActivityLog } from "./src/server/shared/activity-log.ts";
+import { validatePasswordPolicy } from "./src/server/validators/password.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,116 +50,13 @@ const prisma = new PrismaClient({ adapter });
 const JWT_SECRET = process.env.JWT_SECRET || "dev-only-please-change-jwt-secret";
 const AUTH_COOKIE_NAME = "cqupt_src_token";
 const AUTH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-type AuthRole = "admin" | "auditor" | "user";
-
-type AuthPayload = {
-  userId: string;
-  role: AuthRole;
-};
-
-type AuthUser = {
-  id: string;
-  username: string;
-  role: AuthRole;
-  email: string;
-  authCode: string;
-  points: number;
-  hasSignedAgreement: boolean;
-};
-
-function normalizeStatus(status?: string): "active" | "banned" | "pending" {
-  const normalized = status?.toLowerCase();
-  if (normalized === "banned") return "banned";
-  if (normalized === "pending") return "pending";
-  return "active";
-}
-
-function normalizeRole(role?: string): "admin" | "auditor" | "user" {
-  const normalized = role?.toLowerCase();
-  if (normalized === "admin") return "admin";
-  if (normalized === "auditor") return "auditor";
-  return "user";
-}
-
-function toDisplayStatus(status: "active" | "banned" | "pending"): string {
-  if (status === "banned") return "Banned";
-  if (status === "pending") return "Pending";
-  return "Active";
-}
+const CERT_CODE_PREFIX = "CQUPT-";
+const CERT_CODE_SUFFIX_LENGTH = 12;
+const CERT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const CERT_CODE_MAX_ATTEMPTS = 12;
 
 function toDateString(date: Date): string {
   return date.toISOString().split("T")[0];
-}
-
-function severityToCn(
-  severity: "critical" | "high" | "medium" | "low" | "info",
-): "严重" | "高危" | "中危" | "低危" | "信息" {
-  if (severity === "critical") return "严重";
-  if (severity === "high") return "高危";
-  if (severity === "medium") return "中危";
-  if (severity === "low") return "低危";
-  return "信息";
-}
-
-function cnToSeverity(level?: string): "critical" | "high" | "medium" | "low" | "info" {
-  if (level === "严重") return "critical";
-  if (level === "高危") return "high";
-  if (level === "中危") return "medium";
-  if (level === "低危") return "low";
-  return "info";
-}
-
-function statusToCn(
-  status: "pending" | "reviewing" | "approved" | "fixing" | "fixed" | "rejected" | "hidden",
-): "待处理" | "审核中" | "已审核" | "修复中" | "已修复" | "已忽略" | "已隐藏" {
-  if (status === "pending") return "待处理";
-  if (status === "reviewing") return "审核中";
-  if (status === "approved") return "已审核";
-  if (status === "fixing") return "修复中";
-  if (status === "fixed") return "已修复";
-  if (status === "hidden") return "已隐藏";
-  return "已忽略";
-}
-
-function cnToStatus(
-  status?: string,
-): "pending" | "reviewing" | "approved" | "fixing" | "fixed" | "rejected" | "hidden" {
-  if (status === "待处理" || status === "pending") return "pending";
-  if (status === "审核中" || status === "reviewing") return "reviewing";
-  if (status === "已审核" || status === "approved") return "approved";
-  if (status === "修复中" || status === "fixing") return "fixing";
-  if (status === "已修复" || status === "fixed") return "fixed";
-  if (status === "已隐藏" || status === "hidden") return "hidden";
-  if (status === "已忽略" || status === "rejected") return "rejected";
-  return "pending";
-}
-
-function statusToAuditAction(
-  status: "pending" | "reviewing" | "approved" | "fixing" | "fixed" | "rejected" | "hidden",
-): "submit" | "claim" | "approve" | "reject" | "fixing" | "fixed" | "hide" | "reopen" {
-  if (status === "approved") return "approve";
-  if (status === "rejected") return "reject";
-  if (status === "fixing") return "fixing";
-  if (status === "fixed") return "fixed";
-  if (status === "hidden") return "hide";
-  if (status === "pending") return "reopen";
-  if (status === "reviewing") return "claim";
-  return "submit";
-}
-
-function announcementTypeToCn(type: "general" | "security" | "mall" | "maintenance"): string {
-  if (type === "security") return "安全通知";
-  if (type === "mall") return "商城动态";
-  if (type === "maintenance") return "维护公告";
-  return "常规";
-}
-
-function cnToAnnouncementType(type?: string): "general" | "security" | "mall" | "maintenance" {
-  if (type === "安全通知") return "security";
-  if (type === "商城动态") return "mall";
-  if (type === "维护公告") return "maintenance";
-  return "general";
 }
 
 function certTypeToApi(type: "honorary" | "outstanding" | "special"): "Honorary" | "Outstanding" | "Special" {
@@ -177,144 +99,360 @@ function formatDateTime(date: Date): string {
   return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
 }
 
-function parseCookies(cookieHeader?: string): Record<string, string> {
-  if (!cookieHeader) return {};
-  const parts = cookieHeader.split(";");
-  const cookies: Record<string, string> = {};
-  for (const part of parts) {
-    const [rawKey, ...rawValue] = part.trim().split("=");
-    if (!rawKey) continue;
-    cookies[rawKey] = decodeURIComponent(rawValue.join("="));
+function parseDateQueryParam(value: unknown): Date | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function isTruthy(value?: string): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function generateCertificateSuffix(length = CERT_CODE_SUFFIX_LENGTH): string {
+  const bytes = randomBytes(length);
+  let result = "";
+  for (let i = 0; i < length; i += 1) {
+    result += CERT_CODE_ALPHABET[bytes[i] % CERT_CODE_ALPHABET.length];
   }
-  return cookies;
+  return result;
 }
 
-function buildAuthUser(user: {
-  id: string;
-  username: string;
-  role: AuthRole;
-  email: string;
-  authCode: string;
-  points: number;
-  hasSignedAgreement: boolean;
-}) {
-  return {
-    id: user.id,
-    username: user.username,
-    role: user.role,
-    email: user.email,
-    authCode: user.authCode,
-    points: user.points,
-    hasSignedAgreement: user.hasSignedAgreement,
-  };
+async function generateUniqueCertificateCode(prismaClient: PrismaClient): Promise<string> {
+  for (let i = 0; i < CERT_CODE_MAX_ATTEMPTS; i += 1) {
+    const candidate = `${CERT_CODE_PREFIX}${generateCertificateSuffix()}`;
+    const existing = await prismaClient.certificate.findUnique({
+      where: { certCode: candidate },
+      select: { id: true },
+    });
+    if (!existing) return candidate;
+  }
+  throw new Error("CERT_CODE_GENERATION_EXHAUSTED");
 }
 
-function getRequestAuthUser(req: express.Request): AuthUser | undefined {
-  return (req as express.Request & { authUser?: AuthUser }).authUser;
+async function buildEmailCodeStore(): Promise<EmailCodeStore> {
+  const redisUrl = process.env.REDIS_URL?.trim();
+  if (!redisUrl) {
+    console.warn("REDIS_URL is not configured, email code store falls back to in-memory mode.");
+    return new MemoryEmailCodeStore();
+  }
+
+  try {
+    const store = await RedisEmailCodeStore.createFromUrl(redisUrl);
+    console.log("Email code store is using Redis.");
+    return store;
+  } catch (error) {
+    console.error("Failed to connect Redis, falling back to in-memory email code store:", error);
+    return new MemoryEmailCodeStore();
+  }
 }
 
-function setRequestAuthUser(req: express.Request, user: AuthUser): void {
-  (req as express.Request & { authUser?: AuthUser }).authUser = user;
+function buildEmailCodeSender(): EmailCodeSender {
+  const smtpHost = process.env.SMTP_HOST?.trim();
+  const smtpPort = Number(process.env.SMTP_PORT ?? "");
+  const smtpFrom = process.env.SMTP_FROM?.trim();
+  const smtpSecure = isTruthy(process.env.SMTP_SECURE);
+  const smtpUser = process.env.SMTP_USER?.trim();
+  const smtpPass = process.env.SMTP_PASS;
+
+  if (!smtpHost || !Number.isFinite(smtpPort) || !smtpFrom) {
+    console.warn("SMTP is not fully configured, email code sender falls back to console mode.");
+    return new ConsoleEmailCodeSender();
+  }
+
+  console.log(`Email code sender is using SMTP (${smtpHost}:${smtpPort}, secure=${smtpSecure ? "true" : "false"}).`);
+  return new SmtpEmailCodeSender({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpSecure,
+    user: smtpUser,
+    pass: smtpPass,
+    from: smtpFrom,
+  });
+}
+
+function vulnerabilityAuditActionToText(
+  action: "submit" | "claim" | "approve" | "reject" | "fixing" | "fixed" | "hide" | "reopen",
+  vulnCode: string,
+): string {
+  if (action === "submit") return `提交漏洞 ${vulnCode}`;
+  if (action === "claim") return `认领审核漏洞 ${vulnCode}`;
+  if (action === "approve") return `审核通过漏洞 ${vulnCode}`;
+  if (action === "reject") return `驳回漏洞 ${vulnCode}`;
+  if (action === "fixing") return `漏洞进入修复中 ${vulnCode}`;
+  if (action === "fixed") return `漏洞标记已修复 ${vulnCode}`;
+  if (action === "hide") return `隐藏漏洞 ${vulnCode}`;
+  return `重新打开漏洞 ${vulnCode}`;
+}
+
+function vulnerabilityAuditActionToStatus(
+  action: "submit" | "claim" | "approve" | "reject" | "fixing" | "fixed" | "hide" | "reopen",
+): "success" | "info" | "warning" | "error" {
+  if (action === "approve" || action === "fixed") return "success";
+  if (action === "reject" || action === "hide") return "warning";
+  return "info";
 }
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const rawPort = Number(process.env.PORT ?? "3000");
+  const PORT = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 3000;
+  const hmrPortRaw = Number(process.env.VITE_HMR_PORT ?? "24679");
+  const hmrPort = Number.isFinite(hmrPortRaw) && hmrPortRaw > 0 ? Math.floor(hmrPortRaw) : 24679;
+  const emailCodeStore = await buildEmailCodeStore();
+  const emailCodeSender = buildEmailCodeSender();
+  const emailCodesService = new EmailCodesService({
+    store: emailCodeStore,
+    sender: emailCodeSender,
+  });
 
-  app.use(express.json());
-
-  const requireAuth: express.RequestHandler = async (req, res, next) => {
-    try {
-      const cookies = parseCookies(req.headers.cookie);
-      const token = cookies[AUTH_COOKIE_NAME];
-
-      if (!token) {
-        return res.status(401).json({ success: false, message: "未登录或会话已失效" });
-      }
-
-      const payload = jwt.verify(token, JWT_SECRET) as AuthPayload;
-      const user = await prisma.user.findUnique({
-        where: { id: payload.userId },
-      });
-
-      if (!user || user.status !== "active") {
-        return res.status(401).json({ success: false, message: "用户状态异常，请重新登录" });
-      }
-
-      setRequestAuthUser(req, buildAuthUser(user));
-      return next();
-    } catch {
-      return res.status(401).json({ success: false, message: "登录状态无效，请重新登录" });
+  app.use(express.json({ limit: "10mb" }));
+  app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && typeof err === "object" && "type" in err && (err as { type?: string }).type === "entity.too.large") {
+      return sendError(res, 413, "BAD_REQUEST", "上传图片过大，请压缩后重试（建议 10MB 以内）");
     }
-  };
+    if (err && typeof err === "object" && "name" in err && (err as { name?: string }).name === "SyntaxError") {
+      return sendError(res, 400, "BAD_REQUEST", "请求数据格式错误");
+    }
+    return next();
+  });
 
-  const requireRoles = (...roles: AuthRole[]): express.RequestHandler => {
-    return (req, res, next) => {
-      const authUser = getRequestAuthUser(req);
-      if (!authUser) {
-        return res.status(401).json({ success: false, message: "未登录" });
-      }
-      if (!roles.includes(authUser.role)) {
-        return res.status(403).json({ success: false, message: "权限不足" });
-      }
-      return next();
-    };
-  };
+  const requireAuth = createRequireAuth({
+    prisma,
+    jwtSecret: JWT_SECRET,
+    authCookieName: AUTH_COOKIE_NAME,
+  });
 
-  // Mock Database
-  const vulnerabilities = [
-    { id: "VU-2024-001", title: "核心教务系统SQL注入漏洞", url: "jwzx.cqupt.edu.cn", type: "SQL注入", level: "严重", status: "修复中", author: "temp", date: "2024-03-24", description: "存在明显的SQL注入风险...", auditNote: "" },
-    { id: "VU-2024-002", title: "图书管理系统未授权访问", url: "lib.cqupt.edu.cn", type: "权限绕过", level: "高危", status: "已审核", author: "temp", date: "2024-03-22", description: "未授权即可访问敏感数据...", auditNote: "" },
-    { id: "VU-2024-003", title: "宿舍网络中心反射型XSS", url: "net.cqupt.edu.cn", type: "XSS跨站脚本", level: "中危", status: "已修复", author: "temp", date: "2024-03-20", description: "输入框未过滤导致脚本执行...", auditNote: "" },
-    { id: "VU-2024-004", title: "研究生院信息门户逻辑漏洞", url: "yjs.cqupt.edu.cn", type: "逻辑漏洞", level: "高危", status: "待处理", author: "temp", date: "2024-03-25", description: "通过修改参数可以越权查看其他学生成绩...", auditNote: "" },
-    { id: "VU-2024-005", title: "校园卡充值平台信息泄露", url: "ecard.cqupt.edu.cn", type: "信息泄露", level: "中危", status: "待处理", author: "temp", date: "2024-03-26", description: "接口返回了过多的用户隐私字段...", auditNote: "" },
-  ];
-
-  const labs = [
-    { id: "LAB-001", title: "基础SQL注入实战", description: "通过本靶场，您将学习如何识别和利用最基础的UNION型SQL注入漏洞，获取数据库敏感信息。", difficulty: "简单", category: "Web安全", points: 100, url: "https://lab.cqupt.edu.cn/sql-1", image: "https://picsum.photos/seed/sql/800/450" },
-    { id: "LAB-002", title: "XSS跨站脚本攻击进阶", description: "深入理解反射型与存储型XSS的区别，学习如何绕过常见的WAF过滤规则。", difficulty: "中等", category: "Web安全", points: 200, url: "https://lab.cqupt.edu.cn/xss-2", image: "https://picsum.photos/seed/xss/800/450" },
-    { id: "LAB-003", title: "Linux权限提升技巧", description: "探索Linux系统中的SUID权限、内核漏洞及配置不当导致的提权路径。", difficulty: "困难", category: "系统安全", points: 500, url: "https://lab.cqupt.edu.cn/privesc-1", image: "https://picsum.photos/seed/linux/800/450" },
-    { id: "LAB-004", title: "JWT身份验证绕过", description: "学习JWT的结构，以及由于密钥过弱或算法配置不当导致的身份伪造攻击。", difficulty: "中等", category: "逻辑漏洞", points: 300, url: "https://lab.cqupt.edu.cn/jwt-1", image: "https://picsum.photos/seed/jwt/800/450" },
-    { id: "LAB-005", title: "CTF入门杂项练习", description: "包含编码转换、隐写术基础等多种CTF入门必备知识点。", difficulty: "简单", category: "其他", points: 150, url: "https://lab.cqupt.edu.cn/misc-1", image: "https://picsum.photos/seed/misc/800/450" },
-  ];
-
-  const materials = [
-    { id: "MAT-001", title: "OWASP Top 10 2024 深度解析", author: "admin", date: "2024-03-01", type: "技术文档", url: "#", description: "详细解读最新版OWASP十大安全风险。" },
-    { id: "MAT-002", title: "Burp Suite 零基础实战教程", author: "WhiteHat_Zero", date: "2024-02-15", type: "视频教程", url: "#", description: "从安装到高级插件使用的全过程演示。" },
-    { id: "MAT-003", title: "常用渗透测试工具集锦", author: "admin", date: "2024-01-20", type: "工具插件", url: "#", description: "整理了Web渗透、内网渗透常用的各类工具。" },
-    { id: "MAT-004", title: "某大型企业内网渗透案例分享", author: "Security_Bob", date: "2024-03-10", type: "实战案例", url: "#", description: "通过真实案例学习内网渗透的思路与技巧。" },
-    { id: "MAT-005", title: "SRC平台通用规则说明", author: "admin", date: "2024-03-20", type: "其他", url: "#", description: "关于平台漏洞提交、审核及奖励的详细规则。" },
-  ];
-
-  const discussions = [
-    { id: "DIS-001", title: "关于最新教务系统漏洞的修复建议", author: "temp", date: "2024-03-25", replies: 12, category: "技术交流" },
-    { id: "DIS-002", title: "新手如何快速入门CTF？", author: "Security_Bob", date: "2024-03-22", replies: 45, category: "经验分享" },
-    { id: "DIS-003", title: "求推荐好用的内网穿透工具", author: "WhiteHat_Zero", date: "2024-03-20", replies: 8, category: "求助咨询" },
-  ];
-
-  const products = [
-    { id: 'P001', name: 'CQUPT 极客卫衣', price: 5000, stock: 45, category: '服饰', image: 'https://picsum.photos/seed/hoodie/200', status: 'In Stock' },
-    { id: 'P002', name: '机械键盘 (定制版)', price: 12000, stock: 12, category: '数码', image: 'https://picsum.photos/seed/keyboard/200', status: 'In Stock' },
-    { id: 'P003', name: 'SRC 专属徽章', price: 500, stock: 200, category: '周边', image: 'https://picsum.photos/seed/badge/200', status: 'In Stock' },
-    { id: 'P004', name: '京东卡 100元', price: 10000, stock: 0, category: '礼品卡', image: 'https://picsum.photos/seed/card/200', status: 'Out of Stock' },
-  ];
-
-  const redemptions = [
-    { id: 'R001', userId: 'temp', username: 'temp', productId: 'P003', productName: 'SRC 专属徽章', productImage: 'https://picsum.photos/seed/badge/200', points: 500, date: '2024-03-10', status: 'Issued' }
-  ];
+  const requireRoles = (...roles: AuthRole[]): express.RequestHandler => createRequireRoles(...roles);
 
   // Auth Endpoints
-  app.post("/api/login", async (req, res) => {
+  const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 120;
+  const isValidAuthCode = (authCode: string): boolean => /^\d{7}$/.test(authCode);
+
+  app.post("/api/auth/email-code/register/send", async (req, res) => {
     try {
-      const { username, password } = req.body;
+      const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+      if (!isValidEmail(email)) {
+        return sendError(res, 400, "BAD_REQUEST", "邮箱格式不合法");
+      }
+
+      const result = await emailCodesService.send(email, "register");
+      const meta = buildRequestLogMeta(req);
+      await writeActivityLog(prisma, {
+        action: "auth.email_code.sent",
+        targetType: "email",
+        targetId: email,
+        detail: "发送注册验证码",
+        status: "info",
+        ...meta,
+      });
+
+      const exposeDevCode =
+        process.env.NODE_ENV !== "production" && emailCodeSender instanceof ConsoleEmailCodeSender;
+      return res.json({
+        success: true,
+        message: "验证码已发送",
+        expiresInSec: result.expiresInSec,
+        cooldownInSec: result.cooldownInSec,
+        ...(exposeDevCode ? { devCode: result.code } : {}),
+      });
+    } catch (error) {
+      const err = error as Error;
+      if (err.message === "SEND_TOO_FREQUENT") {
+        return sendError(res, 429, "BAD_REQUEST", "发送过于频繁，请稍后再试");
+      }
+      return sendError(res, 500, "INTERNAL_ERROR", "验证码发送失败");
+    }
+  });
+
+  app.post("/api/auth/email-code/password/send", requireAuth, async (req, res) => {
+    try {
+      const authUser = getRequestAuthUser(req);
+      if (!authUser) return sendError(res, 401, "UNAUTHORIZED", "未登录");
+
+      const result = await emailCodesService.send(authUser.email, "change_password");
+      const meta = buildRequestLogMeta(req);
+      await writeActivityLog(prisma, {
+        actorId: authUser.id,
+        action: "auth.email_code.sent",
+        targetType: "user",
+        targetId: authUser.id,
+        detail: "发送改密验证码",
+        status: "info",
+        ...meta,
+      });
+
+      const exposeDevCode =
+        process.env.NODE_ENV !== "production" && emailCodeSender instanceof ConsoleEmailCodeSender;
+      return res.json({
+        success: true,
+        message: "验证码已发送",
+        expiresInSec: result.expiresInSec,
+        cooldownInSec: result.cooldownInSec,
+        ...(exposeDevCode ? { devCode: result.code } : {}),
+      });
+    } catch (error) {
+      const err = error as Error;
+      if (err.message === "SEND_TOO_FREQUENT") {
+        return sendError(res, 429, "BAD_REQUEST", "发送过于频繁，请稍后再试");
+      }
+      return sendError(res, 500, "INTERNAL_ERROR", "验证码发送失败");
+    }
+  });
+
+  app.post("/api/auth/email-code/forgot/send", async (req, res) => {
+    try {
+      const authCode = typeof req.body?.authCode === "string" ? req.body.authCode.trim() : "";
+      const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+      if (!isValidAuthCode(authCode) || !isValidEmail(email)) {
+        return sendError(res, 400, "BAD_REQUEST", "请填写正确的统一认证码（7位数字）和邮箱");
+      }
+
       const user = await prisma.user.findFirst({
         where: {
-          OR: [{ username }, { authCode: username }],
+          authCode,
+          email,
+        },
+        select: { id: true },
+      });
+
+      if (!user) {
+        return res.json({
+          success: true,
+          message: "若账号信息匹配，验证码已发送",
+          cooldownInSec: 60,
+        });
+      }
+
+      const result = await emailCodesService.send(email, "forgot_password");
+      const meta = buildRequestLogMeta(req);
+      await writeActivityLog(prisma, {
+        actorId: user.id,
+        action: "auth.email_code.sent",
+        targetType: "user",
+        targetId: user.id,
+        detail: "发送找回密码验证码",
+        status: "info",
+        ...meta,
+      });
+
+      const exposeDevCode =
+        process.env.NODE_ENV !== "production" && emailCodeSender instanceof ConsoleEmailCodeSender;
+      return res.json({
+        success: true,
+        message: "若账号信息匹配，验证码已发送",
+        expiresInSec: result.expiresInSec,
+        cooldownInSec: result.cooldownInSec,
+        ...(exposeDevCode ? { devCode: result.code } : {}),
+      });
+    } catch (error) {
+      const err = error as Error;
+      if (err.message === "SEND_TOO_FREQUENT") {
+        return sendError(res, 429, "BAD_REQUEST", "发送过于频繁，请稍后再试");
+      }
+      return sendError(res, 500, "INTERNAL_ERROR", "验证码发送失败");
+    }
+  });
+
+  app.post("/api/auth/password/forgot/reset", async (req, res) => {
+    try {
+      const authCode = typeof req.body?.authCode === "string" ? req.body.authCode.trim() : "";
+      const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+      const emailCode = typeof req.body?.emailCode === "string" ? req.body.emailCode.trim() : "";
+      const newPassword = typeof req.body?.newPassword === "string" ? req.body.newPassword : "";
+      const confirmPassword = typeof req.body?.confirmPassword === "string" ? req.body.confirmPassword : "";
+
+      if (!isValidAuthCode(authCode) || !isValidEmail(email) || !emailCode || !newPassword || !confirmPassword) {
+        return sendError(res, 400, "BAD_REQUEST", "请填写完整信息");
+      }
+      if (newPassword !== confirmPassword) {
+        return sendError(res, 400, "BAD_REQUEST", "两次输入的新密码不一致");
+      }
+      const passwordIssue = validatePasswordPolicy(newPassword);
+      if (passwordIssue) {
+        return sendError(res, 400, "BAD_REQUEST", passwordIssue);
+      }
+
+      const user = await prisma.user.findFirst({
+        where: {
+          authCode,
+          email,
+        },
+        select: { id: true, passwordHash: true, username: true },
+      });
+      if (!user) {
+        return sendError(res, 400, "BAD_REQUEST", "统一认证码或邮箱不匹配");
+      }
+
+      try {
+        await emailCodesService.verify(email, "forgot_password", emailCode, true);
+      } catch (error) {
+        const err = error as Error;
+        if (err.message === "CODE_NOT_FOUND") {
+          return sendError(res, 400, "BAD_REQUEST", "请先获取邮箱验证码");
+        }
+        if (err.message === "CODE_EXPIRED") {
+          return sendError(res, 400, "BAD_REQUEST", "邮箱验证码已过期，请重新获取");
+        }
+        if (err.message === "CODE_INVALID") {
+          return sendError(res, 400, "BAD_REQUEST", "邮箱验证码错误");
+        }
+        return sendError(res, 500, "INTERNAL_ERROR", "验证码校验失败");
+      }
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: await bcrypt.hash(newPassword, 10),
+        },
+      });
+
+      const meta = buildRequestLogMeta(req);
+      await writeActivityLog(prisma, {
+        actorId: user.id,
+        action: "user.password.forgot_reset",
+        targetType: "user",
+        targetId: user.id,
+        detail: `用户通过找回流程重置密码: ${user.username}`,
+        status: "warning",
+        ...meta,
+      });
+
+      return res.json({ success: true, message: "密码重置成功，请重新登录" });
+    } catch {
+      return sendError(res, 500, "INTERNAL_ERROR", "找回密码失败");
+    }
+  });
+
+  app.post("/api/login", async (req, res) => {
+    try {
+      const authCodeRaw = typeof req.body?.authCode === "string" ? req.body.authCode : req.body?.username;
+      const authCode = typeof authCodeRaw === "string" ? authCodeRaw.trim() : "";
+      const password = typeof req.body?.password === "string" ? req.body.password : "";
+      if (!isValidAuthCode(authCode)) {
+        return sendError(res, 400, "BAD_REQUEST", "统一认证码需为7位数字");
+      }
+
+      const user = await prisma.user.findFirst({
+        where: {
+          authCode,
         },
       });
 
       if (!user) {
-        return res.status(401).json({ success: false, message: "账号或密码错误" });
+        const meta = buildRequestLogMeta(req);
+        await writeActivityLog(prisma, {
+          action: "auth.login.failed",
+          targetType: "account",
+          targetId: authCode,
+          detail: "账号不存在或密码错误",
+          status: "warning",
+          ...meta,
+        });
+        return sendError(res, 401, "UNAUTHORIZED", "账号或密码错误");
       }
 
       let isPasswordValid = false;
@@ -332,11 +470,20 @@ async function startServer() {
       }
 
       if (!isPasswordValid) {
-        return res.status(401).json({ success: false, message: "账号或密码错误" });
+        const meta = buildRequestLogMeta(req);
+        await writeActivityLog(prisma, {
+          action: "auth.login.failed",
+          targetType: "account",
+          targetId: authCode,
+          detail: "账号或密码错误",
+          status: "warning",
+          ...meta,
+        });
+        return sendError(res, 401, "UNAUTHORIZED", "账号或密码错误");
       }
 
       const token = jwt.sign(
-        { userId: user.id, role: user.role } satisfies AuthPayload,
+        { userId: user.id, role: user.role },
         JWT_SECRET,
         { expiresIn: "7d" },
       );
@@ -349,34 +496,77 @@ async function startServer() {
         path: "/",
       });
 
+      const meta = buildRequestLogMeta(req);
+      await writeActivityLog(prisma, {
+        actorId: user.id,
+        action: "auth.login.success",
+        targetType: "user",
+        targetId: user.id,
+        detail: `登录成功: ${user.username}`,
+        status: "success",
+        ...meta,
+      });
+
       return res.json({
         success: true,
         user: buildAuthUser(user),
       });
     } catch {
-      return res.status(500).json({ success: false, message: "登录失败" });
+      return sendError(res, 500, "INTERNAL_ERROR", "登录失败");
     }
   });
 
   app.post("/api/register", async (req, res) => {
     try {
-      const { username, authCode, password, email } = req.body;
+      const { username, authCode, password, email, emailCode } = req.body;
+      const normalizedEmail = typeof email === "string" ? email.trim() : "";
+      const normalizedAuthCode = typeof authCode === "string" ? authCode.trim() : "";
+
+      if (!username || !normalizedAuthCode || !password || !normalizedEmail || !emailCode) {
+        return sendError(res, 400, "BAD_REQUEST", "请填写完整注册信息");
+      }
+      if (!isValidAuthCode(normalizedAuthCode)) {
+        return sendError(res, 400, "BAD_REQUEST", "统一认证码需为7位数字");
+      }
+      if (!isValidEmail(normalizedEmail)) {
+        return sendError(res, 400, "BAD_REQUEST", "邮箱格式不合法");
+      }
+      const passwordIssue = validatePasswordPolicy(String(password));
+      if (passwordIssue) {
+        return sendError(res, 400, "BAD_REQUEST", passwordIssue);
+      }
+
+      try {
+        await emailCodesService.verify(normalizedEmail, "register", String(emailCode), true);
+      } catch (error) {
+        const err = error as Error;
+        if (err.message === "CODE_NOT_FOUND") {
+          return sendError(res, 400, "BAD_REQUEST", "请先获取邮箱验证码");
+        }
+        if (err.message === "CODE_EXPIRED") {
+          return sendError(res, 400, "BAD_REQUEST", "邮箱验证码已过期，请重新获取");
+        }
+        if (err.message === "CODE_INVALID") {
+          return sendError(res, 400, "BAD_REQUEST", "邮箱验证码错误");
+        }
+        return sendError(res, 500, "INTERNAL_ERROR", "验证码校验失败");
+      }
 
       const existingUser = await prisma.user.findFirst({
         where: {
-          OR: [{ username }, { authCode }, { email }],
+          OR: [{ username }, { authCode: normalizedAuthCode }, { email: normalizedEmail }],
         },
       });
 
       if (existingUser) {
-        return res.status(400).json({ success: false, message: "用户名、认证码或邮箱已存在" });
+        return sendError(res, 400, "BAD_REQUEST", "用户名、统一认证码或邮箱已存在");
       }
 
       const newUser = await prisma.user.create({
         data: {
           username,
-          authCode,
-          email,
+          authCode: normalizedAuthCode,
+          email: normalizedEmail,
           passwordHash: await bcrypt.hash(password, 10),
           role: "user",
           points: 0,
@@ -386,7 +576,7 @@ async function startServer() {
       });
 
       const token = jwt.sign(
-        { userId: newUser.id, role: newUser.role } satisfies AuthPayload,
+        { userId: newUser.id, role: newUser.role },
         JWT_SECRET,
         { expiresIn: "7d" },
       );
@@ -396,6 +586,17 @@ async function startServer() {
         secure: process.env.NODE_ENV === "production",
         maxAge: AUTH_COOKIE_MAX_AGE_MS,
         path: "/",
+      });
+
+      const meta = buildRequestLogMeta(req);
+      await writeActivityLog(prisma, {
+        actorId: newUser.id,
+        action: "auth.register.success",
+        targetType: "user",
+        targetId: newUser.id,
+        detail: `注册成功: ${newUser.username}`,
+        status: "success",
+        ...meta,
       });
 
       return res.json({
@@ -407,11 +608,12 @@ async function startServer() {
           email: newUser.email,
           authCode: newUser.authCode,
           points: newUser.points,
+          avatar: newUser.avatarUrl ?? undefined,
           hasSignedAgreement: newUser.hasSignedAgreement,
         },
       });
     } catch {
-      return res.status(500).json({ success: false, message: "注册失败" });
+      return sendError(res, 500, "INTERNAL_ERROR", "注册失败");
     }
   });
 
@@ -419,438 +621,239 @@ async function startServer() {
     return res.json({ success: true, user: getRequestAuthUser(req) });
   });
 
-  app.post("/api/logout", (req, res) => {
+  app.post("/api/logout", async (req, res) => {
+    const authUser = getRequestAuthUser(req);
     res.clearCookie(AUTH_COOKIE_NAME, {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
     });
+
+    const meta = buildRequestLogMeta(req);
+    await writeActivityLog(prisma, {
+      actorId: authUser?.id,
+      action: "auth.logout",
+      targetType: "user",
+      targetId: authUser?.id,
+      detail: "用户退出登录",
+      status: "info",
+      ...meta,
+    });
     return res.json({ success: true });
   });
 
-  // Vuln Endpoints
-  app.get("/api/vulnerabilities", async (req, res) => {
-    try {
-      const dbVulns = await prisma.vulnerability.findMany({
-        include: {
-          submitter: { select: { username: true } },
-          audits: {
-            orderBy: { createdAt: "desc" },
-            take: 1,
-            select: { note: true },
-          },
-        },
-        orderBy: { submittedAt: "desc" },
-      });
+  app.use(
+    "/api/vulnerabilities",
+    createVulnerabilitiesRouter({
+      prisma,
+      requireAuth,
+      requireRoles,
+    }),
+  );
 
-      return res.json(
-        dbVulns.map((v) => ({
-          id: v.vulnCode,
-          title: v.title,
-          url: v.targetUrl,
-          type: v.vulnType,
-          level: severityToCn(v.severity),
-          status: statusToCn(v.status),
-          author: v.submitter.username,
-          date: toDateString(v.submittedAt),
-          description: v.description,
-          auditNote: v.audits[0]?.note ?? "",
+  app.use(
+    "/api/announcements",
+    createAnnouncementsRouter({
+      prisma,
+      requireAuth,
+      requireRoles,
+    }),
+  );
+
+  app.use(
+    "/api/users",
+    createUsersRouter({
+      prisma,
+      requireAuth,
+      requireRoles,
+      emailCodesService,
+    }),
+  );
+
+  // Audit Logs Endpoint
+  app.get("/api/logs", requireAuth, requireRoles("admin", "auditor"), async (req, res) => {
+    try {
+      const startDate = parseDateQueryParam(req.query.startDate);
+      const endDate = parseDateQueryParam(req.query.endDate);
+      const userKeyword = typeof req.query.user === "string" ? req.query.user.trim().toLowerCase() : "";
+      const ipKeyword = typeof req.query.ip === "string" ? req.query.ip.trim().toLowerCase() : "";
+      const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim().toLowerCase() : "";
+      const statusFilter = typeof req.query.status === "string" ? req.query.status : "all";
+      const sourceFilter = typeof req.query.source === "string" ? req.query.source : "all";
+      const rawPage = Number(req.query.page);
+      const rawPageSize = Number(req.query.pageSize);
+      const rawLimit = Number(req.query.limit);
+      const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
+      const pageSize = Number.isFinite(rawPageSize)
+        ? Math.max(1, Math.min(200, Math.floor(rawPageSize)))
+        : Number.isFinite(rawLimit)
+          ? Math.max(1, Math.min(200, Math.floor(rawLimit)))
+          : 50;
+
+      const [auditRows, pointRows, redemptionRows, announcementRows, activityRows] = await Promise.all([
+        prisma.vulnerabilityAudit.findMany({
+          take: 300,
+          orderBy: { createdAt: "desc" },
+          include: {
+            auditor: { select: { username: true } },
+            vulnerability: { select: { vulnCode: true } },
+          },
+        }),
+        prisma.userPointLog.findMany({
+          take: 300,
+          orderBy: { createdAt: "desc" },
+          include: {
+            user: { select: { username: true } },
+            createdBy: { select: { username: true } },
+          },
+        }),
+        prisma.redemption.findMany({
+          take: 300,
+          orderBy: { updatedAt: "desc" },
+          include: {
+            user: { select: { username: true } },
+            product: { select: { name: true } },
+            issuedBy: { select: { username: true } },
+          },
+        }),
+        prisma.announcement.findMany({
+          take: 300,
+          orderBy: { updatedAt: "desc" },
+          include: {
+            author: { select: { username: true } },
+          },
+        }),
+        prisma.activityLog.findMany({
+          take: 500,
+          orderBy: { createdAt: "desc" },
+          include: {
+            actor: { select: { username: true } },
+          },
+        }),
+      ]);
+
+      const entries = [
+        ...auditRows.map((row) => ({
+          id: `audit-${row.id}`,
+          time: row.createdAt,
+          user: row.auditor.username,
+          action: vulnerabilityAuditActionToText(row.action, row.vulnerability.vulnCode),
+          ip: "-",
+          status: vulnerabilityAuditActionToStatus(row.action),
+          source: "vulnerability",
         })),
-      );
-    } catch {
-      return res.status(500).json({ success: false, message: "获取漏洞列表失败" });
-    }
-  });
-
-  app.post("/api/vulnerabilities", requireAuth, async (req, res) => {
-    try {
-      const { title, url, type, level, description } = req.body as Record<string, string>;
-      const submitter = getRequestAuthUser(req);
-      if (!submitter) return res.status(401).json({ success: false, message: "未登录" });
-
-      const year = new Date().getFullYear();
-      const existingCodes = await prisma.vulnerability.findMany({
-        where: { vulnCode: { startsWith: `VU-${year}-` } },
-        select: { vulnCode: true },
-      });
-      const maxSerial = existingCodes.reduce((max, item) => {
-        const serial = Number(item.vulnCode.split("-")[2]);
-        if (Number.isNaN(serial)) return max;
-        return Math.max(max, serial);
-      }, 0);
-      const nextSerial = String(maxSerial + 1).padStart(4, "0");
-      const vulnCode = `VU-${year}-${nextSerial}`;
-
-      const created = await prisma.vulnerability.create({
-        data: {
-          vulnCode,
-          title,
-          targetUrl: url,
-          vulnType: type,
-          severity: cnToSeverity(level),
-          status: "pending",
-          description,
-          submitterId: submitter.id,
-          submittedAt: new Date(),
-        },
-        include: {
-          submitter: { select: { username: true } },
-        },
-      });
-
-      await prisma.vulnerabilityAudit.create({
-        data: {
-          vulnerabilityId: created.id,
-          auditorId: created.submitterId,
-          action: "submit",
-          toStatus: "pending",
-          note: "漏洞已提交，待审核。",
-        },
-      });
-
-      return res.json({
-        success: true,
-        vuln: {
-          id: created.vulnCode,
-          title: created.title,
-          url: created.targetUrl,
-          type: created.vulnType,
-          level: severityToCn(created.severity),
-          status: statusToCn(created.status),
-          author: created.submitter.username,
-          date: toDateString(created.submittedAt),
-          description: created.description,
-          auditNote: "",
-        },
-      });
-    } catch {
-      return res.status(500).json({ success: false, message: "漏洞提交失败" });
-    }
-  });
-
-  app.patch("/api/vulnerabilities/:id", requireAuth, requireRoles("admin", "auditor"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const updates = req.body as Record<string, unknown>;
-
-      const existing = await prisma.vulnerability.findUnique({
-        where: { vulnCode: id },
-      });
-      if (!existing) {
-        return res.status(404).json({ success: false, message: "漏洞不存在" });
-      }
-
-      const data: Record<string, unknown> = {};
-      if (typeof updates.title === "string") data.title = updates.title;
-      if (typeof updates.url === "string") data.targetUrl = updates.url;
-      if (typeof updates.type === "string") data.vulnType = updates.type;
-      if (typeof updates.level === "string") data.severity = cnToSeverity(updates.level);
-      if (typeof updates.description === "string") data.description = updates.description;
-      if (typeof updates.status === "string") data.status = cnToStatus(updates.status);
-
-      const updated = await prisma.vulnerability.update({
-        where: { vulnCode: id },
-        data,
-      });
-
-      if (typeof updates.status === "string" || typeof updates.auditNote === "string") {
-        await prisma.vulnerabilityAudit.create({
-          data: {
-            vulnerabilityId: existing.id,
-            auditorId: existing.currentAuditorId ?? existing.submitterId,
-            action: statusToAuditAction(updated.status),
-            fromStatus: existing.status,
-            toStatus: updated.status,
-            note: typeof updates.auditNote === "string" ? updates.auditNote : null,
-          },
+        ...pointRows.map((row) => {
+          const actor = row.createdBy?.username || row.user.username;
+          const sign = row.delta >= 0 ? "+" : "";
+          return {
+            id: `points-${row.id}`,
+            time: row.createdAt,
+            user: actor,
+            action: `积分变更 ${row.changeType} (${row.user.username} ${sign}${row.delta}, 余额 ${row.balanceAfter})`,
+            ip: "-",
+            status: row.delta >= 0 ? ("success" as const) : ("info" as const),
+            source: "points",
+          };
+        }),
+        ...redemptionRows.map((row) => {
+          const actor = row.issuedBy?.username || row.user.username;
+          const action =
+            row.status === "issued"
+              ? `发放兑换 ${row.redemptionCode}（${row.product.name}）`
+              : row.status === "cancelled"
+                ? `取消兑换 ${row.redemptionCode}（${row.product.name}）`
+                : `创建兑换 ${row.redemptionCode}（${row.product.name}）`;
+          const status =
+            row.status === "issued"
+              ? ("success" as const)
+              : row.status === "cancelled"
+                ? ("warning" as const)
+                : ("info" as const);
+          return {
+            id: `redeem-${row.id}`,
+            time: row.updatedAt,
+            user: actor,
+            action,
+            ip: "-",
+            status,
+            source: "mall",
+          };
+        }),
+        ...announcementRows.map((row) => {
+          const action =
+            row.status === "archived"
+              ? `归档公告《${row.title}》`
+              : row.createdAt.getTime() === row.updatedAt.getTime()
+                ? `发布公告《${row.title}》`
+                : `更新公告《${row.title}》`;
+          const status = row.status === "archived" ? ("warning" as const) : ("success" as const);
+          return {
+            id: `notice-${row.id}`,
+            time: row.updatedAt,
+            user: row.author.username,
+            action,
+            ip: "-",
+            status,
+            source: "announcement",
+          };
+        }),
+        ...activityRows.map((row) => ({
+          id: `activity-${row.id}`,
+          time: row.createdAt,
+          user: row.actor?.username ?? "system",
+          action: row.detail || row.action,
+          ip: row.ip || "-",
+          status: row.status as "success" | "info" | "warning" | "error",
+          source: "security",
+        })),
+      ]
+        .sort((a, b) => b.time.getTime() - a.time.getTime())
+        .filter((item) => {
+          if (startDate && item.time < startDate) return false;
+          if (endDate) {
+            const end = new Date(endDate);
+            end.setDate(end.getDate() + 1);
+            if (item.time >= end) return false;
+          }
+          if (statusFilter !== "all" && item.status !== statusFilter) return false;
+          if (sourceFilter !== "all" && item.source !== sourceFilter) return false;
+          if (userKeyword && !item.user.toLowerCase().includes(userKeyword)) return false;
+          if (ipKeyword && !item.ip.toLowerCase().includes(ipKeyword)) return false;
+          if (keyword) {
+            const content = `${item.user} ${item.action} ${item.source} ${formatDateTime(item.time)}`.toLowerCase();
+            if (!content.includes(keyword)) return false;
+          }
+          return true;
         });
-      }
 
-      return res.json({ success: true });
-    } catch {
-      return res.status(500).json({ success: false, message: "漏洞更新失败" });
-    }
-  });
-
-  // Announcement Endpoints
-  app.get("/api/announcements", async (req, res) => {
-    try {
-      const rows = await prisma.announcement.findMany({
-        include: {
-          author: { select: { username: true } },
-        },
-        where: { status: { not: "archived" } },
-        orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
-      });
-
-      return res.json(
-        rows.map((a) => ({
-          id: a.id,
-          title: a.title,
-          content: a.content,
-          date: toDateString(a.publishedAt ?? a.createdAt),
-          author: a.author.username,
-          type: announcementTypeToCn(a.type),
-          isPinned: a.isPinned,
-        })),
-      );
-    } catch {
-      return res.status(500).json({ success: false, message: "获取公告失败" });
-    }
-  });
-
-  app.post("/api/announcements", requireAuth, requireRoles("admin", "auditor"), async (req, res) => {
-    try {
-      const { title, content, type, isPinned, author } = req.body as Record<string, unknown>;
-      const authorName = typeof author === "string" ? author : getRequestAuthUser(req)?.username ?? "";
-      const dbAuthor = await prisma.user.findUnique({ where: { username: authorName } });
-
-      if (!dbAuthor) {
-        return res.status(404).json({ success: false, message: "发布者不存在" });
-      }
-
-      const created = await prisma.announcement.create({
-        data: {
-          title: String(title ?? ""),
-          content: String(content ?? ""),
-          type: cnToAnnouncementType(typeof type === "string" ? type : undefined),
-          isPinned: Boolean(isPinned),
-          authorId: dbAuthor.id,
-          status: "published",
-          publishedAt: new Date(),
-        },
-        include: {
-          author: { select: { username: true } },
-        },
-      });
+      const total = entries.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const safePage = Math.min(page, totalPages);
+      const start = (safePage - 1) * pageSize;
+      const end = start + pageSize;
+      const paged = entries.slice(start, end).map((item, idx) => ({
+        id: start + idx + 1,
+        time: formatDateTime(item.time),
+        user: item.user,
+        action: item.action,
+        ip: item.ip,
+        status: item.status,
+        source: item.source,
+      }));
 
       return res.json({
         success: true,
-        announcement: {
-          id: created.id,
-          title: created.title,
-          content: created.content,
-          date: toDateString(created.publishedAt ?? created.createdAt),
-          author: created.author.username,
-          type: announcementTypeToCn(created.type),
-          isPinned: created.isPinned,
-        },
+        page: safePage,
+        pageSize,
+        total,
+        totalPages,
+        hasNext: safePage < totalPages,
+        logs: paged,
       });
-    } catch {
-      return res.status(500).json({ success: false, message: "公告发布失败" });
-    }
-  });
-
-  app.delete("/api/announcements/:id", requireAuth, requireRoles("admin", "auditor"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      await prisma.announcement.update({
-        where: { id },
-        data: { status: "archived" },
-      });
-      return res.json({ success: true });
-    } catch {
-      return res.status(404).json({ success: false, message: "公告不存在" });
-    }
-  });
-
-  app.put("/api/announcements/:id", requireAuth, requireRoles("admin", "auditor"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { title, content, type, isPinned } = req.body as Record<string, unknown>;
-
-      const updated = await prisma.announcement.update({
-        where: { id },
-        data: {
-          title: typeof title === "string" ? title : undefined,
-          content: typeof content === "string" ? content : undefined,
-          type: typeof type === "string" ? cnToAnnouncementType(type) : undefined,
-          isPinned: typeof isPinned === "boolean" ? isPinned : undefined,
-        },
-        include: {
-          author: { select: { username: true } },
-        },
-      });
-
-      return res.json({
-        success: true,
-        announcement: {
-          id: updated.id,
-          title: updated.title,
-          content: updated.content,
-          date: toDateString(updated.publishedAt ?? updated.createdAt),
-          author: updated.author.username,
-          type: announcementTypeToCn(updated.type),
-          isPinned: updated.isPinned,
-        },
-      });
-    } catch {
-      return res.status(404).json({ success: false, message: "公告不存在" });
-    }
-  });
-
-  // User Endpoints
-  app.get("/api/users", requireAuth, requireRoles("admin"), async (req, res) => {
-    try {
-      const dbUsers = await prisma.user.findMany({
-        orderBy: { createdAt: "desc" },
-      });
-
-      return res.json(
-        dbUsers.map((u) => ({
-          id: u.id,
-          username: u.username,
-          role: u.role,
-          email: u.email,
-          authCode: u.authCode,
-          points: u.points,
-          registrationDate: toDateString(u.createdAt),
-          status: toDisplayStatus(u.status),
-          hasSignedAgreement: u.hasSignedAgreement,
-        })),
-      );
-    } catch {
-      return res.status(500).json({ success: false, message: "获取用户失败" });
-    }
-  });
-
-  app.post("/api/users", requireAuth, requireRoles("admin"), async (req, res) => {
-    try {
-      const { username, email, role, authCode, points, status } = req.body;
-
-      const createdUser = await prisma.user.create({
-        data: {
-          username,
-          email,
-          authCode,
-          role: normalizeRole(role),
-          points: Number(points) || 0,
-          status: normalizeStatus(status),
-          passwordHash: await bcrypt.hash("password123", 10),
-          hasSignedAgreement: false,
-        },
-      });
-
-      return res.status(201).json({
-        success: true,
-        user: {
-          id: createdUser.id,
-          username: createdUser.username,
-          email: createdUser.email,
-          role: createdUser.role,
-          authCode: createdUser.authCode,
-          points: createdUser.points,
-          registrationDate: toDateString(createdUser.createdAt),
-          status: toDisplayStatus(createdUser.status),
-          hasSignedAgreement: createdUser.hasSignedAgreement,
-        },
-      });
-    } catch {
-      return res.status(400).json({ success: false, message: "用户创建失败（可能存在重复字段）" });
-    }
-  });
-
-  app.patch("/api/users/:id", requireAuth, requireRoles("admin"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const updates = req.body as Record<string, unknown>;
-
-      const data: Record<string, unknown> = {};
-      if (typeof updates.username === "string") data.username = updates.username;
-      if (typeof updates.email === "string") data.email = updates.email;
-      if (typeof updates.authCode === "string") data.authCode = updates.authCode;
-      if (typeof updates.role === "string") data.role = normalizeRole(updates.role);
-      if (typeof updates.status === "string") data.status = normalizeStatus(updates.status);
-      if (updates.points !== undefined) data.points = Number(updates.points);
-      if (typeof updates.hasSignedAgreement === "boolean") {
-        data.hasSignedAgreement = updates.hasSignedAgreement;
-      }
-
-      const updatedUser = await prisma.user.update({
-        where: { id },
-        data,
-      });
-
-      return res.json({
-        success: true,
-        user: {
-          id: updatedUser.id,
-          username: updatedUser.username,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          authCode: updatedUser.authCode,
-          points: updatedUser.points,
-          registrationDate: toDateString(updatedUser.createdAt),
-          status: toDisplayStatus(updatedUser.status),
-          hasSignedAgreement: updatedUser.hasSignedAgreement,
-        },
-      });
-    } catch {
-      return res.status(404).json({ success: false, message: "用户不存在或更新失败" });
-    }
-  });
-
-  app.delete("/api/users/:id", requireAuth, requireRoles("admin"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      await prisma.user.delete({ where: { id } });
-      return res.json({ success: true });
-    } catch {
-      return res.status(404).json({ success: false, message: "用户不存在" });
-    }
-  });
-
-  app.post("/api/users/:id/reset-password", requireAuth, requireRoles("admin"), async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { newPassword } = req.body;
-
-      await prisma.user.update({
-        where: { id },
-        data: { passwordHash: await bcrypt.hash(newPassword || "123456", 10) },
-      });
-
-      return res.json({ success: true, message: "密码重置成功" });
-    } catch {
-      return res.status(404).json({ success: false, message: "用户不存在" });
-    }
-  });
-
-  app.post("/api/users/:id/sign-agreement", requireAuth, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const authUser = getRequestAuthUser(req);
-      if (!authUser) {
-        return res.status(401).json({ success: false, message: "未登录" });
-      }
-      if (authUser.role !== "admin" && authUser.id !== id) {
-        return res.status(403).json({ success: false, message: "权限不足" });
-      }
-      const updatedUser = await prisma.user.update({
-        where: { id },
-        data: {
-          hasSignedAgreement: true,
-          agreementSignedAt: new Date(),
-        },
-      });
-
-      return res.json({
-        success: true,
-        user: {
-          id: updatedUser.id,
-          username: updatedUser.username,
-          email: updatedUser.email,
-          role: updatedUser.role,
-          authCode: updatedUser.authCode,
-          points: updatedUser.points,
-          registrationDate: toDateString(updatedUser.createdAt),
-          status: toDisplayStatus(updatedUser.status),
-          hasSignedAgreement: updatedUser.hasSignedAgreement,
-        },
-      });
-    } catch {
-      return res.status(404).json({ success: false, message: "用户不存在" });
+    } catch (error) {
+      console.error("Failed to fetch audit logs:", error);
+      return sendError(res, 500, "INTERNAL_ERROR", "获取日志失败");
     }
   });
 
@@ -877,7 +880,7 @@ async function startServer() {
         })),
       );
     } catch {
-      return res.status(500).json({ success: false, message: "获取证书失败" });
+      return sendError(res, 500, "INTERNAL_ERROR", "获取证书失败");
     }
   });
 
@@ -887,49 +890,51 @@ async function startServer() {
 
       const certOwner = await prisma.user.findUnique({ where: { username } });
       if (!certOwner) {
-        return res.status(404).json({ success: false, message: "证书用户不存在" });
+        return sendError(res, 404, "NOT_FOUND", "证书用户不存在");
       }
 
       const vulnerability = await prisma.vulnerability.findUnique({
         where: { vulnCode: vulnId },
       });
       if (!vulnerability) {
-        return res.status(404).json({ success: false, message: "关联漏洞不存在" });
+        return sendError(res, 404, "NOT_FOUND", "关联漏洞不存在");
       }
 
       const issuer =
         (await prisma.user.findFirst({ where: { role: "admin" }, select: { id: true } })) ??
         { id: certOwner.id };
 
-      const year = new Date().getFullYear();
-      const existingCodes = await prisma.certificate.findMany({
-        where: { certCode: { startsWith: `CERT-${year}-` } },
-        select: { certCode: true },
-      });
-      const maxSerial = existingCodes.reduce((max, item) => {
-        const serial = Number(item.certCode.split("-")[2]);
-        if (Number.isNaN(serial)) return max;
-        return Math.max(max, serial);
-      }, 0);
-      const nextSerial = String(maxSerial + 1).padStart(3, "0");
-      const certCode = `CERT-${year}-${nextSerial}`;
+      let created: any = null;
+      for (let i = 0; i < CERT_CODE_MAX_ATTEMPTS; i += 1) {
+        const certCode = await generateUniqueCertificateCode(prisma);
+        try {
+          created = await prisma.certificate.create({
+            data: {
+              certCode,
+              userId: certOwner.id,
+              vulnerabilityId: vulnerability.id,
+              title: title || `${vulnerability.title} - 荣誉证书`,
+              certType: apiToCertType(type),
+              status: "active",
+              issuedById: issuer.id,
+              issuedAt: new Date(),
+            },
+            include: {
+              user: { select: { username: true } },
+              vulnerability: { select: { vulnCode: true } },
+            },
+          });
+          break;
+        } catch (error) {
+          const code = (error as { code?: string })?.code;
+          if (code === "P2002") continue;
+          throw error;
+        }
+      }
 
-      const created = await prisma.certificate.create({
-        data: {
-          certCode,
-          userId: certOwner.id,
-          vulnerabilityId: vulnerability.id,
-          title: title || `${vulnerability.title} - 荣誉证书`,
-          certType: apiToCertType(type),
-          status: "active",
-          issuedById: issuer.id,
-          issuedAt: new Date(),
-        },
-        include: {
-          user: { select: { username: true } },
-          vulnerability: { select: { vulnCode: true } },
-        },
-      });
+      if (!created) {
+        return sendError(res, 500, "INTERNAL_ERROR", "证书编号生成失败，请重试");
+      }
 
       return res.json({
         success: true,
@@ -944,7 +949,7 @@ async function startServer() {
         },
       });
     } catch {
-      return res.status(400).json({ success: false, message: "证书发放失败（可能已存在关联证书）" });
+      return sendError(res, 400, "BAD_REQUEST", "证书发放失败（可能已存在关联证书）");
     }
   });
 
@@ -960,7 +965,7 @@ async function startServer() {
       });
 
       if (!cert) {
-        return res.status(404).json({ message: "Certificate not found" });
+        return sendError(res, 404, "NOT_FOUND", "Certificate not found");
       }
 
       return res.json({
@@ -973,13 +978,15 @@ async function startServer() {
         date: toDateString(cert.issuedAt),
       });
     } catch {
-      return res.status(500).json({ message: "Certificate search failed" });
+      return sendError(res, 500, "INTERNAL_ERROR", "Certificate search failed");
     }
   });
 
   app.get("/api/certificates/:id/pdf", async (req, res) => {
     try {
       const { id } = req.params;
+      const mode = String(req.query.mode ?? "download");
+      const isPreview = mode === "preview";
       const cert = await prisma.certificate.findUnique({
         where: { certCode: id },
         include: {
@@ -990,7 +997,7 @@ async function startServer() {
       });
 
       if (!cert) {
-        return res.status(404).json({ success: false, message: "Certificate not found" });
+        return sendError(res, 404, "NOT_FOUND", "Certificate not found");
       }
 
       const fontPath = getCertificateFontPath();
@@ -998,7 +1005,7 @@ async function startServer() {
       const filename = `certificate-${cert.certCode}.pdf`;
 
       res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Disposition", `${isPreview ? "inline" : "attachment"}; filename="${filename}"`);
       doc.pipe(res);
 
       if (fontPath) {
@@ -1069,7 +1076,7 @@ async function startServer() {
 
       doc.end();
     } catch {
-      return res.status(500).json({ success: false, message: "Certificate PDF generation failed" });
+      return sendError(res, 500, "INTERNAL_ERROR", "Certificate PDF generation failed");
     }
   });
 
@@ -1086,117 +1093,35 @@ async function startServer() {
       });
       return res.json({ success: true });
     } catch {
-      return res.status(404).json({ message: "Certificate not found" });
+      return sendError(res, 404, "NOT_FOUND", "Certificate not found");
     }
   });
 
-  // Learning Center Endpoints
-  app.get("/api/learning/labs", (req, res) => {
-    res.json(labs);
-  });
+  app.use(
+    "/api/learning",
+    createLearningRouter({
+      prisma,
+      requireAuth,
+      requireRoles,
+    }),
+  );
 
-  app.get("/api/learning/materials", (req, res) => {
-    res.json(materials);
-  });
-
-  app.get("/api/learning/discussions", (req, res) => {
-    res.json(discussions);
-  });
-
-  // Mall Endpoints
-  app.get("/api/mall/products", (req, res) => {
-    res.json(products);
-  });
-
-  app.post("/api/mall/products", requireAuth, requireRoles("admin"), (req, res) => {
-    const product = { ...req.body, id: `P00${products.length + 1}` };
-    products.push(product);
-    res.json({ success: true, product });
-  });
-
-  app.get("/api/mall/redemptions", requireAuth, (req, res) => {
-    const authUser = getRequestAuthUser(req);
-    if (!authUser) {
-      return res.status(401).json({ success: false, message: "未登录" });
-    }
-    const { userId } = req.query;
-    if (authUser.role === "user") {
-      return res.json(redemptions.filter((r) => r.userId === authUser.id));
-    }
-    if (userId) {
-      return res.json(redemptions.filter((r) => r.userId === userId));
-    }
-    return res.json(redemptions);
-  });
-
-  app.post("/api/mall/redemptions", requireAuth, async (req, res) => {
-    try {
-      const authUser = getRequestAuthUser(req);
-      if (!authUser) {
-        return res.status(401).json({ success: false, message: "未登录" });
-      }
-      const { userId, productId } = req.body;
-      if (authUser.role === "user" && authUser.id !== userId) {
-        return res.status(403).json({ success: false, message: "仅可为本人发起兑换" });
-      }
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      const product = products.find((p) => p.id === productId);
-
-      if (!user || !product) {
-        return res.status(404).json({ success: false, message: "用户或商品不存在" });
-      }
-
-      if (user.points < product.price) {
-        return res.status(400).json({ success: false, message: "积分不足" });
-      }
-
-      if (product.stock <= 0) {
-        return res.status(400).json({ success: false, message: "库存不足" });
-      }
-
-      const updatedUser = await prisma.user.update({
-        where: { id: user.id },
-        data: { points: user.points - product.price },
-      });
-
-      product.stock -= 1;
-      if (product.stock === 0) product.status = "Out of Stock";
-
-      const redemption = {
-        id: `R00${redemptions.length + 1}`,
-        userId: user.id,
-        username: user.username,
-        productId: product.id,
-        productName: product.name,
-        productImage: product.image,
-        points: product.price,
-        date: new Date().toISOString().split("T")[0],
-        status: "Pending",
-      };
-
-      redemptions.push(redemption);
-      return res.json({ success: true, redemption, userPoints: updatedUser.points });
-    } catch {
-      return res.status(500).json({ success: false, message: "兑换失败" });
-    }
-  });
-
-  app.patch("/api/mall/redemptions/:id", requireAuth, requireRoles("admin"), (req, res) => {
-    const { id } = req.params;
-    const { status } = req.body;
-    const index = redemptions.findIndex(r => r.id === id);
-    if (index !== -1) {
-      redemptions[index].status = status;
-      res.json({ success: true, redemption: redemptions[index] });
-    } else {
-      res.status(404).json({ success: false, message: "兑换记录不存在" });
-    }
-  });
+  app.use(
+    "/api/mall",
+    createMallRouter({
+      prisma,
+      requireAuth,
+      requireRoles,
+    }),
+  );
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: { port: hmrPort },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);

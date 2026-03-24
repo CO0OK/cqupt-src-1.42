@@ -2,8 +2,27 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ShoppingBag, Search, Plus, Edit2, Trash2, Package, Tag, Coins, AlertCircle, Filter, X, History, CheckCircle, Clock, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Redemption } from '../types';
+import { getApiErrorMessage } from '../utils/apiError';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function MallManage() {
+  type Notice = { type: 'success' | 'error'; message: string } | null;
+  type NewProductForm = {
+    name: string;
+    price: number;
+    stock: number;
+    category: string;
+    image: string;
+    status: 'Active' | 'Out of Stock' | 'Inactive';
+  };
+  type ProductField = keyof NewProductForm | 'body';
+  type ValidationIssue = { field?: string; reason?: string };
+  type ConfirmAction =
+    | { kind: 'delete_product'; productId: string; label: string }
+    | { kind: 'issue_redemption'; redemptionId: string; label: string }
+    | { kind: 'save_product'; label: string }
+    | null;
+
   const [activeTab, setActiveTab] = useState<'products' | 'redemptions'>('products');
   const [products, setProducts] = useState<Product[]>([]);
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
@@ -19,14 +38,84 @@ export default function MallManage() {
   });
   const [sortBy, setSortBy] = useState('name');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newProduct, setNewProduct] = useState({
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+  const [isDeletingProductId, setIsDeletingProductId] = useState<string | null>(null);
+  const [productFieldErrors, setProductFieldErrors] = useState<Partial<Record<ProductField, string>>>({});
+  const [newProduct, setNewProduct] = useState<NewProductForm>({
     name: '',
     price: 0,
-    stock: 0,
+    stock: 1,
     category: '服饰',
     image: '',
-    status: 'Active' as const
+    status: 'Active'
   });
+  const emptyProduct: NewProductForm = {
+    name: '',
+    price: 0,
+    stock: 1,
+    category: '服饰',
+    image: '',
+    status: 'Active'
+  };
+  const PRODUCT_CATEGORIES = ['服饰', '数码', '周边', '礼品卡', '其他'] as const;
+
+  const fieldLabelMap: Record<ProductField, string> = {
+    name: '商品名称',
+    price: '价格',
+    stock: '库存',
+    category: '商品分类',
+    image: '商品图片',
+    status: '商品状态',
+    body: '表单',
+  };
+
+  const reasonLabelMap: Record<string, string> = {
+    required: '必填',
+    'must be integer': '必须为整数',
+    'must be between 1 and 999999': '取值范围应为 1-999999',
+    'must be between 0 and 999999': '取值范围应为 0-999999',
+    'must be between 1 and 999': '取值范围应为 1-999',
+    'must be Active|Out of Stock|Inactive': '状态值不合法',
+    'must be non-empty string': '不能为空',
+    'must be string': '必须为字符串',
+    'must be string|null': '必须为字符串或空',
+    'length must be <= 120': '长度不能超过 120',
+    'length must be <= 50': '长度不能超过 50',
+    'at least one field is required': '至少填写一个字段',
+    'no valid updatable field provided': '没有可更新字段',
+  };
+
+  const mapProductFieldErrors = (payload: unknown): Partial<Record<ProductField, string>> => {
+    const response = payload as { details?: unknown };
+    const details = Array.isArray(response?.details) ? (response.details as ValidationIssue[]) : [];
+    const errors: Partial<Record<ProductField, string>> = {};
+
+    details.forEach((item) => {
+      const rawField = typeof item?.field === 'string' ? item.field : 'body';
+      const field = (['name', 'price', 'stock', 'category', 'image', 'status', 'body'].includes(rawField)
+        ? rawField
+        : 'body') as ProductField;
+      const rawReason = typeof item?.reason === 'string' ? item.reason : '参数不合法';
+      const label = reasonLabelMap[rawReason] || rawReason;
+      if (!errors[field]) {
+        errors[field] = `${fieldLabelMap[field]}${label === '必填' ? '为必填项' : `：${label}`}`;
+      }
+    });
+
+    return errors;
+  };
+
+  const clearProductFieldError = (field: ProductField) => {
+    setProductFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
 
   useEffect(() => {
     fetchData();
@@ -61,9 +150,13 @@ export default function MallManage() {
       const data = await res.json();
       if (data.success) {
         setRedemptions(prev => prev.map(r => r.id === redemptionId ? { ...r, status: newStatus } : r));
+        setNotice({ type: 'success', message: '兑换状态已更新为已发放' });
+      } else {
+        setNotice({ type: 'error', message: getApiErrorMessage(data, '更新兑换状态失败', res.status) });
       }
     } catch (error) {
       console.error('Failed to update redemption status:', error);
+      setNotice({ type: 'error', message: '更新兑换状态失败' });
     }
   };
 
@@ -79,31 +172,121 @@ export default function MallManage() {
   };
 
   const handleAddProduct = async () => {
-    if (!newProduct.name || !newProduct.image) {
-      alert('请填写完整商品信息并上传图片');
-      return;
-    }
+    const priceValue = Number(newProduct.price);
+    const stockValue = Number(newProduct.stock);
+    const safePrice = Number.isFinite(priceValue) ? priceValue : 0;
+    const safeStock = Number.isFinite(stockValue) ? stockValue : 0;
+    const shouldForceOutOfStock = newProduct.status === 'Active' && safeStock <= 0;
+
+    const payload: NewProductForm = {
+      ...newProduct,
+      price: safePrice,
+      stock: safeStock,
+      status: shouldForceOutOfStock ? 'Out of Stock' : newProduct.status,
+    };
+
+    setIsSavingProduct(true);
+    setProductFieldErrors({});
     try {
-      const res = await fetch('/api/mall/products', {
-        method: 'POST',
+      const isEditMode = Boolean(editingProductId);
+      const endpoint = isEditMode ? `/api/mall/products/${editingProductId}` : '/api/mall/products';
+      const method = isEditMode ? 'PATCH' : 'POST';
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProduct),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
-        setProducts([...products, data.product]);
+        if (shouldForceOutOfStock) {
+          setNotice({ type: 'success', message: '库存为 0，系统已自动按“下架”创建/更新商品。' });
+        }
+        if (isEditMode) {
+          setProducts(products.map(p => (p.id === editingProductId ? data.product : p)));
+        } else {
+          setProducts([...products, data.product]);
+        }
+        if (!shouldForceOutOfStock) {
+          setNotice({ type: 'success', message: isEditMode ? '商品更新成功' : '商品创建成功' });
+        }
         setShowAddModal(false);
-        setNewProduct({
-          name: '',
-          price: 0,
-          stock: 0,
-          category: '服饰',
-          image: '',
-          status: 'Active'
-        });
+        setEditingProductId(null);
+        setNewProduct(emptyProduct);
+        setProductFieldErrors({});
+      } else {
+        const fieldErrors = mapProductFieldErrors(data);
+        if (Object.keys(fieldErrors).length > 0) {
+          setProductFieldErrors(fieldErrors);
+        } else {
+          setNotice({ type: 'error', message: getApiErrorMessage(data, isEditMode ? '商品更新失败' : '商品创建失败', res.status) });
+        }
       }
     } catch (error) {
       console.error('Failed to add product:', error);
+      setNotice({ type: 'error', message: editingProductId ? '商品更新失败' : '商品创建失败' });
+    } finally {
+      setIsSavingProduct(false);
+    }
+  };
+
+  const handleOpenAddProductModal = () => {
+    setEditingProductId(null);
+    setNewProduct(emptyProduct);
+    setProductFieldErrors({});
+    setShowAddModal(true);
+  };
+
+  const handleOpenEditProductModal = (product: Product) => {
+    setEditingProductId(product.id);
+    setNewProduct({
+      name: product.name,
+      price: product.price,
+      stock: product.stock,
+      category: product.category,
+      image: product.image,
+      status: product.status,
+    });
+    setProductFieldErrors({});
+    setShowAddModal(true);
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    setIsDeletingProductId(productId);
+    try {
+      const res = await fetch(`/api/mall/products/${productId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProducts(prev => prev.filter(p => p.id !== productId));
+        setNotice({ type: 'success', message: '商品已删除' });
+      } else {
+        setNotice({ type: 'error', message: getApiErrorMessage(data, '删除商品失败', res.status) });
+      }
+    } catch (error) {
+      console.error('Failed to delete product:', error);
+      setNotice({ type: 'error', message: '删除商品失败' });
+    } finally {
+      setIsDeletingProductId(null);
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    if (!confirmAction) return;
+    const action = confirmAction;
+    if (action.kind === 'delete_product') {
+      await handleDeleteProduct(action.productId);
+      setConfirmAction(null);
+      return;
+    }
+    if (action.kind === 'issue_redemption') {
+      await handleUpdateRedemptionStatus(action.redemptionId, 'Issued');
+      setConfirmAction(null);
+      return;
+    }
+    if (action.kind === 'save_product') {
+      await handleAddProduct();
+      setConfirmAction(null);
     }
   };
 
@@ -152,8 +335,20 @@ export default function MallManage() {
     });
   }, [redemptions, searchTerm]);
 
+  const categoryCount = useMemo(() => {
+    return new Set(products.map((p) => p.category)).size;
+  }, [products]);
+
   return (
     <div className="space-y-6">
+      {notice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${notice.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -181,7 +376,7 @@ export default function MallManage() {
           </div>
           {activeTab === 'products' && (
             <button 
-              onClick={() => setShowAddModal(true)}
+              onClick={handleOpenAddProductModal}
               className="flex items-center justify-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-xl transition-all shadow-lg shadow-primary-600/20"
             >
               <Plus className="w-4 h-4" />
@@ -222,7 +417,7 @@ export default function MallManage() {
               </div>
               <div>
                 <p className="text-sm text-gray-500 dark:text-slate-400">商品分类</p>
-                <p className="text-2xl font-bold dark:text-white">4</p>
+                <p className="text-2xl font-bold dark:text-white">{categoryCount}</p>
               </div>
             </div>
           </div>
@@ -272,18 +467,6 @@ export default function MallManage() {
                 <Filter className="w-4 h-4 text-gray-400" />
                 高级筛选
               </button>
-
-              <select 
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary-500 transition-all dark:text-white outline-none"
-              >
-                <option value="name">名称排序</option>
-                <option value="price_asc">价格升序</option>
-                <option value="price_desc">价格降序</option>
-                <option value="stock_asc">库存升序</option>
-                <option value="stock_desc">库存降序</option>
-              </select>
             </>
           )}
         </div>
@@ -296,7 +479,7 @@ export default function MallManage() {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50"
             >
-              <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">商品分类</label>
                   <select 
@@ -305,10 +488,9 @@ export default function MallManage() {
                     className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="全部">全部分类</option>
-                    <option value="服饰">服饰</option>
-                    <option value="数码">数码</option>
-                    <option value="周边">周边</option>
-                    <option value="礼品卡">礼品卡</option>
+                    {PRODUCT_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -320,7 +502,22 @@ export default function MallManage() {
                   >
                     <option value="全部">全部状态</option>
                     <option value="Active">上架中</option>
-                    <option value="Out of Stock">已下架</option>
+                    <option value="Out of Stock">缺货下架</option>
+                    <option value="Inactive">手动停用</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">排序方式</label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="name">名称排序</option>
+                    <option value="price_asc">价格升序</option>
+                    <option value="price_desc">价格降序</option>
+                    <option value="stock_asc">库存升序</option>
+                    <option value="stock_desc">库存降序</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -403,19 +600,34 @@ export default function MallManage() {
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-lg text-[10px] font-bold ${
-                        product.status === 'Active' 
-                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
-                          : 'bg-red-50 text-red-600 border border-red-100'
+                        product.status === 'Active'
+                          ? 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+                          : product.status === 'Inactive'
+                            ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                            : 'bg-red-50 text-red-600 border border-red-100'
                       }`}>
-                        {product.status === 'Active' ? '上架中' : '已下架'}
+                        {product.status === 'Active' ? '上架中' : product.status === 'Inactive' ? '已停用' : '缺货下架'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-all">
+                        <button
+                          onClick={() => handleOpenEditProductModal(product)}
+                          className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-all"
+                        >
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all">
+                        <button
+                          onClick={() =>
+                            setConfirmAction({
+                              kind: 'delete_product',
+                              productId: product.id,
+                              label: `${product.name}（ID: ${product.id}）`,
+                            })
+                          }
+                          disabled={isDeletingProductId === product.id}
+                          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all disabled:opacity-50"
+                        >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -475,7 +687,13 @@ export default function MallManage() {
                     <td className="px-6 py-4 text-right">
                       {r.status === 'Pending' && (
                         <button 
-                          onClick={() => handleUpdateRedemptionStatus(r.id, 'Issued')}
+                          onClick={() =>
+                            setConfirmAction({
+                              kind: 'issue_redemption',
+                              redemptionId: r.id,
+                              label: `${r.username} · ${r.productName}`,
+                            })
+                          }
                           className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-colors shadow-lg shadow-emerald-500/20"
                         >
                           确认发放
@@ -498,62 +716,96 @@ export default function MallManage() {
             className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden"
           >
             <div className="p-6 border-b border-gray-100 dark:border-slate-800">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">添加新商品</h3>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                {editingProductId ? '编辑商品' : '添加新商品'}
+              </h3>
             </div>
             <div className="p-6 grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">商品名称</label>
                 <input 
                   type="text" 
-                  className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none" 
+                  className={`w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none ${productFieldErrors.name ? 'border border-red-300 dark:border-red-600' : 'border-none'}`}
                   placeholder="输入商品名称"
                   value={newProduct.name}
-                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                  onChange={(e) => {
+                    clearProductFieldError('name');
+                    setNewProduct({ ...newProduct, name: e.target.value });
+                  }}
                 />
+                {productFieldErrors.name ? (
+                  <p className="mt-1 text-xs text-red-600">{productFieldErrors.name}</p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">价格 (积分)</label>
                 <input 
                   type="number" 
-                  className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none" 
+                  className={`w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none ${productFieldErrors.price ? 'border border-red-300 dark:border-red-600' : 'border-none'}`}
                   placeholder="0"
                   value={newProduct.price}
-                  onChange={(e) => setNewProduct({ ...newProduct, price: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    clearProductFieldError('price');
+                    const value = Number(e.target.value);
+                    setNewProduct({ ...newProduct, price: Number.isFinite(value) ? value : 0 });
+                  }}
                 />
+                {productFieldErrors.price ? (
+                  <p className="mt-1 text-xs text-red-600">{productFieldErrors.price}</p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">库存数量</label>
                 <input 
                   type="number" 
-                  className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none" 
+                  className={`w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none ${productFieldErrors.stock ? 'border border-red-300 dark:border-red-600' : 'border-none'}`}
                   placeholder="0"
                   value={newProduct.stock}
-                  onChange={(e) => setNewProduct({ ...newProduct, stock: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    clearProductFieldError('stock');
+                    const value = Number(e.target.value);
+                    setNewProduct({ ...newProduct, stock: Number.isFinite(value) ? value : 0 });
+                  }}
                 />
+                {productFieldErrors.stock ? (
+                  <p className="mt-1 text-xs text-red-600">{productFieldErrors.stock}</p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">商品分类</label>
                 <select 
-                  className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none"
+                  className={`w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none ${productFieldErrors.category ? 'border border-red-300 dark:border-red-600' : 'border-none'}`}
                   value={newProduct.category}
-                  onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
+                  onChange={(e) => {
+                    clearProductFieldError('category');
+                    setNewProduct({ ...newProduct, category: e.target.value });
+                  }}
                 >
-                  <option>服饰</option>
-                  <option>数码</option>
-                  <option>周边</option>
-                  <option>礼品卡</option>
+                  {PRODUCT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
                 </select>
+                {productFieldErrors.category ? (
+                  <p className="mt-1 text-xs text-red-600">{productFieldErrors.category}</p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">商品状态</label>
                 <select 
-                  className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none"
+                  className={`w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none ${productFieldErrors.status ? 'border border-red-300 dark:border-red-600' : 'border-none'}`}
                   value={newProduct.status}
-                  onChange={(e) => setNewProduct({ ...newProduct, status: e.target.value as 'Active' | 'Out of Stock' })}
+                  onChange={(e) => {
+                    clearProductFieldError('status');
+                    setNewProduct({ ...newProduct, status: e.target.value as NewProductForm['status'] });
+                  }}
                 >
                   <option value="Active">上架</option>
                   <option value="Out of Stock">下架</option>
+                  <option value="Inactive">停用</option>
                 </select>
+                {productFieldErrors.status ? (
+                  <p className="mt-1 text-xs text-red-600">{productFieldErrors.status}</p>
+                ) : null}
               </div>
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">商品图片</label>
@@ -564,28 +816,93 @@ export default function MallManage() {
                   <label className="flex-grow flex flex-col items-center justify-center px-4 py-6 bg-gray-50 dark:bg-slate-800 border-2 border-dashed border-gray-200 dark:border-slate-700 rounded-2xl cursor-pointer hover:border-primary-500 transition-all">
                     <Plus className="w-6 h-6 text-gray-400 mb-1" />
                     <span className="text-xs text-gray-500">{newProduct.image ? '更换图片' : '上传本地图片'}</span>
-                    <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        clearProductFieldError('image');
+                        handleImageUpload(e);
+                      }}
+                    />
                   </label>
                 </div>
+                {productFieldErrors.image ? (
+                  <p className="mt-1 text-xs text-red-600">{productFieldErrors.image}</p>
+                ) : null}
+                {productFieldErrors.body ? (
+                  <p className="mt-1 text-xs text-red-600">{productFieldErrors.body}</p>
+                ) : null}
               </div>
             </div>
             <div className="p-6 bg-gray-50 dark:bg-slate-800/50 flex justify-end gap-3">
               <button 
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false);
+                  setEditingProductId(null);
+                  setNewProduct(emptyProduct);
+                  setProductFieldErrors({});
+                }}
                 className="px-4 py-2 text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white transition-colors"
               >
                 取消
               </button>
               <button 
-                onClick={handleAddProduct}
-                className="px-6 py-2 bg-primary-600 text-white rounded-xl font-semibold hover:bg-primary-700 transition-all shadow-lg shadow-primary-600/20"
+                onClick={() =>
+                  setConfirmAction({
+                    kind: 'save_product',
+                    label: `${newProduct.name || '未命名商品'} · ${editingProductId ? '编辑模式' : '新增模式'}`,
+                  })
+                }
+                disabled={isSavingProduct}
+                className="px-6 py-2 bg-primary-600 text-white rounded-xl font-semibold hover:bg-primary-700 transition-all shadow-lg shadow-primary-600/20 disabled:opacity-50"
               >
-                添加商品
+                {isSavingProduct ? '提交中...' : editingProductId ? '保存修改' : '添加商品'}
               </button>
             </div>
           </motion.div>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirmAction}
+        title={
+          confirmAction?.kind === 'issue_redemption'
+            ? '确认发放兑换'
+            : confirmAction?.kind === 'save_product'
+              ? editingProductId
+                ? '确认保存商品修改'
+                : '确认创建商品'
+              : '确认删除商品'
+        }
+        description={
+          confirmAction?.kind === 'issue_redemption'
+            ? '确认后该兑换记录将更新为“已发放”。'
+            : confirmAction?.kind === 'save_product'
+              ? '提交后将保存商品信息并影响前台兑换展示。'
+              : '删除后不可恢复；若商品有关联兑换记录，后端会阻止删除并返回冲突提示。'
+        }
+        highlightText={confirmAction?.label || ''}
+        confirmText={
+          confirmAction?.kind === 'issue_redemption'
+            ? '确认发放'
+            : confirmAction?.kind === 'save_product'
+              ? editingProductId
+                ? '确认保存'
+                : '确认创建'
+              : '确认删除'
+        }
+        danger={confirmAction?.kind === 'delete_product'}
+        confirmDisabled={
+          confirmAction?.kind === 'delete_product'
+            ? !!isDeletingProductId
+            : confirmAction?.kind === 'save_product'
+              ? isSavingProduct
+              : false
+        }
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={handleConfirmAction}
+      />
     </div>
   );
 }

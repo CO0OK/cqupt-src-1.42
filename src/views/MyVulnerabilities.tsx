@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Vulnerability, User } from '../types';
-import { Search, Shield, Globe, Clock, CheckCircle, AlertTriangle, Eye, EyeOff, ChevronRight, Info, Filter, X } from 'lucide-react';
+import { Search, Shield, Globe, Clock, CheckCircle, AlertTriangle, Eye, Download, ChevronRight, Info, Filter, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface MyVulnerabilitiesProps {
@@ -12,6 +12,7 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [simpleFilter, setSimpleFilter] = useState('all'); // all, pending, high, resolved
   const [filters, setFilters] = useState({
     status: '全部',
     level: '全部',
@@ -19,6 +20,9 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
     endDate: ''
   });
   const [sortBy, setSortBy] = useState('date_desc');
+
+  const canPreviewAttachment = (mimeType?: string) =>
+    ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'].includes(mimeType || '');
 
   const fetchVulns = async () => {
     try {
@@ -45,11 +49,19 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
       
       if (!matchesSearch) return false;
 
+      if (simpleFilter === 'pending' && v.status !== '待处理') return false;
+      if (simpleFilter === 'high' && !['严重', '高危'].includes(v.level)) return false;
+      if (simpleFilter === 'resolved' && v.status !== '已修复') return false;
+
       if (filters.status !== '全部' && v.status !== filters.status) return false;
       if (filters.level !== '全部' && v.level !== filters.level) return false;
 
       if (filters.startDate && new Date(v.date) < new Date(filters.startDate)) return false;
-      if (filters.endDate && new Date(v.date) > new Date(filters.endDate)) return false;
+      if (filters.endDate) {
+        const end = new Date(filters.endDate);
+        end.setDate(end.getDate() + 1);
+        if (new Date(v.date) >= end) return false;
+      }
 
       return true;
     });
@@ -65,7 +77,7 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
     });
 
     return result;
-  }, [vulns, searchTerm, filters, sortBy]);
+  }, [vulns, searchTerm, simpleFilter, filters, sortBy]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -91,7 +103,7 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
             查看并追踪您提交的所有漏洞报告及其处理进度
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-full md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input 
@@ -102,11 +114,42 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
               className="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl text-sm focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white shadow-sm"
             />
           </div>
+
+          <div className="flex items-center bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
+            <button
+              onClick={() => setSimpleFilter('all')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'all' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              全部
+            </button>
+            <button
+              onClick={() => setSimpleFilter('pending')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'pending' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              待处理
+            </button>
+            <button
+              onClick={() => setSimpleFilter('high')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'high' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              高危/严重
+            </button>
+            <button
+              onClick={() => setSimpleFilter('resolved')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'resolved' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              已修复
+            </button>
+          </div>
+
           <button 
             onClick={() => setShowAdvanced(!showAdvanced)}
-            className={`p-2 rounded-xl border transition-all ${showAdvanced ? 'bg-primary-50 border-primary-200 text-primary-600' : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800 text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800'}`}
+            className={`px-4 py-2 text-sm font-bold rounded-xl border transition-all ${showAdvanced ? 'bg-primary-50 border-primary-200 text-primary-600' : 'bg-white dark:bg-slate-900 border-gray-200 dark:border-slate-800 text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-800'}`}
           >
-            <Filter className="w-5 h-5" />
+            <span className="inline-flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              高级筛选
+            </span>
           </button>
         </div>
       </div>
@@ -119,7 +162,7 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm grid grid-cols-1 md:grid-cols-5 gap-4">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">漏洞状态</label>
                 <select 
@@ -162,10 +205,29 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
                 </select>
               </div>
               <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">开始日期</label>
+                <input
+                  type="date"
+                  value={filters.startDate}
+                  onChange={(e) => setFilters({...filters, startDate: e.target.value})}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">结束日期</label>
+                <input
+                  type="date"
+                  value={filters.endDate}
+                  onChange={(e) => setFilters({...filters, endDate: e.target.value})}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-5">
                 <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">重置</label>
                 <button 
                   onClick={() => {
                     setFilters({ status: '全部', level: '全部', startDate: '', endDate: '' });
+                    setSimpleFilter('all');
                     setSearchTerm('');
                   }}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-800 text-gray-500 hover:text-red-500 transition-colors flex items-center justify-center gap-2"
@@ -308,6 +370,39 @@ export default function MyVulnerabilities({ user }: MyVulnerabilitiesProps) {
                     {selectedVuln.description}
                   </div>
                 </div>
+
+                {selectedVuln.attachment ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-bold text-gray-700 dark:text-slate-300">提交附件</p>
+                    <div className="p-4 bg-gray-50 dark:bg-slate-950 rounded-2xl border border-gray-100 dark:border-slate-800 space-y-3">
+                      <p className="text-sm text-gray-700 dark:text-slate-300">{selectedVuln.attachment}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {canPreviewAttachment(selectedVuln.attachmentType) ? (
+                          <button
+                            onClick={() => {
+                              window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=preview`, '_blank', 'noopener');
+                            }}
+                            className="px-3 py-2 text-xs font-bold rounded-xl border border-primary-200 text-primary-700 bg-primary-50 hover:bg-primary-100 transition-all inline-flex items-center gap-1"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> 安全预览
+                          </button>
+                        ) : (
+                          <span className="px-3 py-2 text-xs rounded-xl border border-amber-200 text-amber-700 bg-amber-50">
+                            该格式不支持在线预览，请下载后在本地查看
+                          </span>
+                        )}
+                        <button
+                          onClick={() => {
+                            window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=download`, '_blank', 'noopener');
+                          }}
+                          className="px-3 py-2 text-xs font-bold rounded-xl border border-gray-200 text-gray-700 bg-white hover:bg-gray-100 transition-all inline-flex items-center gap-1"
+                        >
+                          <Download className="w-3.5 h-3.5" /> 下载附件
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
 
                 {selectedVuln.auditNote && (
                   <div className="space-y-2">

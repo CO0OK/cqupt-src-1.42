@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { 
   ShieldAlert, 
   ChevronDown, 
@@ -6,8 +6,6 @@ import {
   Moon, 
   LogOut, 
   User as UserIcon, 
-  KeyRound, 
-  Camera,
   Coins,
   Home,
   ClipboardCheck,
@@ -32,25 +30,37 @@ interface NavbarProps {
   onLogout: () => void;
   isDarkMode: boolean;
   toggleTheme: () => void;
-  openModal: (type: 'profile' | 'password' | 'avatar') => void;
 }
 
 const iconMap: Record<string, any> = {
   Home, ClipboardCheck, Database, Award, ShoppingBag, Users, Megaphone, FileText, ShieldPlus, Trophy, Bell, BookOpen
 };
 
-export default function Navbar({ user, activeTab, setActiveTab, onLogout, isDarkMode, toggleTheme, openModal }: NavbarProps) {
+export default function Navbar({ user, activeTab, setActiveTab, onLogout, isDarkMode, toggleTheme }: NavbarProps) {
   const [showDropdown, setShowDropdown] = useState(false);
+  const navRef = useRef<HTMLElement | null>(null);
   const filteredNav = NAV_ITEMS.filter(item => item.roles.includes(user.role));
+
+  const handleNavWheel = (e: React.WheelEvent<HTMLElement>) => {
+    const container = navRef.current;
+    if (!container) return;
+    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    container.scrollLeft += e.deltaY;
+    e.preventDefault();
+  };
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-gray-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setActiveTab('home')}>
-          <img src="src\CQUPT\CQUPT_03_logo.png" alt="Logo" className="w-45 h-12" />
+        <div className="flex shrink-0 items-center gap-2 cursor-pointer" onClick={() => setActiveTab('home')}>
+          <img src="src\CQUPT\CQUPT_01_logo_8.png" alt="Logo" className="w-45 h-12" />
         </div>
 
-        <nav className="hidden lg:flex items-center space-x-1">
+        <nav
+          ref={navRef}
+          onWheel={handleNavWheel}
+          className="hidden lg:flex flex-1 min-w-0 mx-4 items-center gap-1 overflow-x-auto whitespace-nowrap scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {filteredNav.map(item => {
             const Icon = iconMap[item.icon] || Home;
             const isActive = activeTab === item.id;
@@ -58,7 +68,7 @@ export default function Navbar({ user, activeTab, setActiveTab, onLogout, isDark
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                   isActive 
                     ? 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20' 
                     : 'text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800'
@@ -71,7 +81,7 @@ export default function Navbar({ user, activeTab, setActiveTab, onLogout, isDark
           })}
         </nav>
 
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 items-center gap-4">
           {user.role === 'user' && (
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-100 dark:bg-slate-800 border border-gray-200 dark:border-slate-700">
               <Coins className="w-4 h-4 text-amber-500" />
@@ -114,22 +124,10 @@ export default function Navbar({ user, activeTab, setActiveTab, onLogout, isDark
               >
                 <div className="py-1">
                   <button 
-                    onClick={() => openModal('profile')}
+                    onClick={() => setActiveTab('profile_center')}
                     className="flex items-center gap-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-50 dark:hover:bg-slate-800 dark:text-white text-gray-700"
                   >
                     <UserIcon className="w-4 h-4" /> 个人中心
-                  </button>
-                  <button 
-                    onClick={() => openModal('password')}
-                    className="flex items-center gap-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-50 dark:hover:bg-slate-800 dark:text-white text-gray-700"
-                  >
-                    <KeyRound className="w-4 h-4" /> 修改密码
-                  </button>
-                  <button 
-                    onClick={() => openModal('avatar')}
-                    className="flex items-center gap-2 px-4 py-2 text-sm w-full text-left hover:bg-gray-50 dark:hover:bg-slate-800 dark:text-white text-gray-700"
-                  >
-                    <Camera className="w-4 h-4" /> 修改头像
                   </button>
                   <hr className="border-gray-100 dark:border-slate-800" />
                   <button 

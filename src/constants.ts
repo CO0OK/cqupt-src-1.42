@@ -8,7 +8,8 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'mall_manage', label: '商城管理', icon: 'ShoppingBag', roles: ['admin'] },
   { id: 'users', label: '用户管理', icon: 'Users', roles: ['admin'] },
   { id: 'notices', label: '公告管理', icon: 'Megaphone', roles: ['admin', 'auditor'] },
-  { id: 'logs', label: '查看日志', icon: 'FileText', roles: ['admin'] },
+  { id: 'learning_manage', label: '学习管理', icon: 'BookOpen', roles: ['admin', 'auditor'] },
+  { id: 'logs', label: '查看日志', icon: 'FileText', roles: ['admin', 'auditor'] },
   
   // User specific
   { id: 'submit', label: '漏洞提交', icon: 'ShieldPlus', roles: ['user'] },

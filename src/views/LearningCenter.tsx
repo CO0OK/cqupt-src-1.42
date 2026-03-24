@@ -51,24 +51,45 @@ const LabCard = ({ lab, onClick }: { lab: Lab; onClick: () => void }) => (
           <Info className="w-3 h-3" /> 点击查看详情
         </span>
       </div>
-      <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-md text-white text-[10px] font-bold uppercase tracking-wider">
+      <div className="absolute top-3 left-3 px-2 py-1 rounded-lg bg-black/45 backdrop-blur-md text-white text-[10px] font-bold">
         {lab.category}
+      </div>
+      <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-amber-400/95 text-amber-900 text-[10px] font-extrabold">
+        {lab.points} 积分
       </div>
     </div>
     <div className="p-5">
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-2">
         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${DIFFICULTY_STYLES[lab.difficulty] || DIFFICULTY_STYLES['简单']}`}>
           {lab.difficulty}
         </span>
+        <span className="text-[11px] text-gray-500 dark:text-slate-400 line-clamp-1">{lab.category}</span>
       </div>
       <h4 className="font-bold text-gray-900 dark:text-white group-hover:text-primary-600 transition-colors">{lab.title}</h4>
       <p className="text-xs text-gray-500 dark:text-slate-400 mt-2 line-clamp-2">{lab.description}</p>
+      <button className="mt-4 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 text-xs font-bold">
+        <Terminal className="w-3.5 h-3.5" />
+        查看并进入
+      </button>
     </div>
   </motion.div>
 );
 
 const MaterialCard = ({ material }: { material: Material }) => {
   const style = MATERIAL_STYLES[material.type] || MATERIAL_STYLES['default'];
+  const handleDownload = () => {
+    if (!material.url) return;
+    if (material.url.startsWith('data:')) {
+      const link = document.createElement('a');
+      link.href = material.url;
+      link.download = material.title || 'learning-material';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+    window.open(material.url, '_blank');
+  };
   
   return (
     <motion.div 
@@ -76,9 +97,18 @@ const MaterialCard = ({ material }: { material: Material }) => {
       className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 overflow-hidden shadow-sm hover:shadow-xl transition-all group"
     >
       <div className="aspect-video relative overflow-hidden bg-gray-100 dark:bg-slate-800 flex items-center justify-center">
-        <div className={`p-6 rounded-2xl ${style.colorClass}`}>
-          {style.icon}
-        </div>
+        {material.image ? (
+          <img
+            src={material.image}
+            alt={material.title}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <div className={`p-6 rounded-2xl ${style.colorClass}`}>
+            {style.icon}
+          </div>
+        )}
         <div className="absolute top-3 right-3 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-md text-white text-[10px] font-bold uppercase tracking-wider">
           {material.type}
         </div>
@@ -90,7 +120,11 @@ const MaterialCard = ({ material }: { material: Material }) => {
           <div className="flex items-center gap-2 text-[10px] text-gray-500">
             <span className="flex items-center gap-1"><UserIcon className="w-3 h-3" /> {material.author}</span>
           </div>
-          <button className="flex items-center gap-1 px-3 py-1.5 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-lg text-xs font-bold hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-all">
+          <button
+            onClick={handleDownload}
+            disabled={!material.url}
+            className="flex items-center gap-1 px-3 py-1.5 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-lg text-xs font-bold hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-all disabled:opacity-50"
+          >
             <Download className="w-3 h-3" /> 下载
           </button>
         </div>
@@ -123,9 +157,12 @@ const LabDetailModal = ({ lab, onClose }: { lab: Lab; onClose: () => void }) => 
       
       <div className="md:w-1/2 p-8 flex flex-col">
         <div className="flex justify-between items-start mb-6">
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${DIFFICULTY_STYLES[lab.difficulty] || DIFFICULTY_STYLES['简单']}`}>
               {lab.difficulty}
+            </span>
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 font-bold">
+              {lab.points} 积分
             </span>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors">
@@ -301,7 +338,7 @@ export default function LearningCenter({ user }: { user: User }) {
           </h3>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
           {activeSubTab === 'labs' ? (
             filteredLabs.length > 0 ? (
               filteredLabs.map(lab => (

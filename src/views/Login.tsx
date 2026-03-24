@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { ShieldAlert, Eye, EyeOff, Fingerprint, Lock } from 'lucide-react';
 import { User } from '../types';
 import SliderCaptcha from '../components/SliderCaptcha';
+import { getApiErrorMessage } from '../utils/apiError';
+import { PASSWORD_POLICY_HINT, validatePasswordPolicyText } from '../utils/passwordPolicy';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -11,11 +13,32 @@ interface LoginProps {
 }
 
 export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleTheme }: LoginProps) {
-  const [username, setUsername] = useState('');
+  const [authCode, setAuthCode] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isVerified, setIsVerified] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [isSendingForgotCode, setIsSendingForgotCode] = useState(false);
+  const [forgotCodeCountdown, setForgotCodeCountdown] = useState(0);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotNotice, setForgotNotice] = useState('');
+  const [forgotForm, setForgotForm] = useState({
+    authCode: '',
+    email: '',
+    emailCode: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+
+  React.useEffect(() => {
+    if (forgotCodeCountdown <= 0) return;
+    const timer = window.setInterval(() => {
+      setForgotCodeCountdown((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [forgotCodeCountdown]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,16 +51,97 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ authCode, password }),
       });
       const data = await response.json();
       if (data.success) {
         onLogin(data.user);
       } else {
-        setError(data.message);
+        setError(getApiErrorMessage(data, '登录失败，请稍后再试', response.status));
       }
     } catch (err) {
       setError('登录失败，请稍后再试');
+    }
+  };
+
+  const handleSendForgotCode = async () => {
+    const authCode = forgotForm.authCode.trim();
+    const email = forgotForm.email.trim();
+    if (!authCode || !email) {
+      setForgotError('请先填写统一认证码和邮箱');
+      return;
+    }
+    if (!/^\d{7}$/.test(authCode)) {
+      setForgotError('统一认证码需为7位数字');
+      return;
+    }
+
+    setIsSendingForgotCode(true);
+    setForgotError('');
+    setForgotNotice('');
+    try {
+      const response = await fetch('/api/auth/email-code/forgot/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ authCode, email }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(getApiErrorMessage(data, '验证码发送失败，请稍后再试', response.status));
+      }
+
+      const cooldown = typeof data.cooldownInSec === 'number' ? data.cooldownInSec : 60;
+      setForgotCodeCountdown(Math.max(1, cooldown));
+      if (typeof data.devCode === 'string') {
+        setForgotNotice(`开发环境验证码：${data.devCode}`);
+      } else {
+        setForgotNotice(typeof data.message === 'string' ? data.message : '验证码已发送，请查收邮箱');
+      }
+    } catch (err) {
+      setForgotError(err instanceof Error ? err.message : '验证码发送失败，请稍后再试');
+    } finally {
+      setIsSendingForgotCode(false);
+    }
+  };
+
+  const handleResetForgotPassword = async () => {
+    setForgotError('');
+    setForgotNotice('');
+    const issue = validatePasswordPolicyText(forgotForm.newPassword);
+    if (issue) {
+      setForgotError(issue);
+      return;
+    }
+    if (forgotForm.newPassword !== forgotForm.confirmPassword) {
+      setForgotError('两次输入的新密码不一致');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      const response = await fetch('/api/auth/password/forgot/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(forgotForm),
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(getApiErrorMessage(data, '密码重置失败，请稍后再试', response.status));
+      }
+
+      setForgotNotice(typeof data.message === 'string' ? data.message : '密码重置成功，请重新登录');
+      setForgotForm({
+        authCode: '',
+        email: '',
+        emailCode: '',
+        newPassword: '',
+        confirmPassword: '',
+      });
+      setForgotCodeCountdown(0);
+    } catch (err) {
+      setForgotError(err instanceof Error ? err.message : '密码重置失败，请稍后再试');
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -77,9 +181,10 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
               <input 
                 type="text" 
                 required 
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="请输入您的 ID" 
+                maxLength={7}
+                value={authCode}
+                onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, '').slice(0, 7))}
+                placeholder="请输入7位统一认证码" 
                 className="w-full pl-11 pr-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
               />
             </div>
@@ -107,6 +212,19 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
+            <div className="text-right mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setForgotError('');
+                  setForgotNotice('');
+                  setShowForgotModal(true);
+                }}
+                className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
+              >
+                忘记密码？
+              </button>
+            </div>
           </div>
 
           <SliderCaptcha onVerify={setIsVerified} isDarkMode={isDarkMode} />
@@ -130,6 +248,107 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
           </p>
         </div>
       </div>
+      {showForgotModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">找回密码</h3>
+              <button
+                type="button"
+                onClick={() => setShowForgotModal(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 text-sm"
+              >
+                关闭
+              </button>
+            </div>
+            {forgotError ? (
+              <div className="rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm px-3 py-2">
+                {forgotError}
+              </div>
+            ) : null}
+            {forgotNotice ? (
+              <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-300 text-sm px-3 py-2">
+                {forgotNotice}
+              </div>
+            ) : null}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">统一认证码</label>
+              <input
+                type="text"
+                maxLength={7}
+                value={forgotForm.authCode}
+                onChange={(e) =>
+                  setForgotForm((prev) => ({ ...prev, authCode: e.target.value.replace(/\D/g, '').slice(0, 7) }))
+                }
+                className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">邮箱</label>
+              <input
+                type="email"
+                value={forgotForm.email}
+                onChange={(e) => setForgotForm((prev) => ({ ...prev, email: e.target.value.trim() }))}
+                className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">邮箱验证码</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={forgotForm.emailCode}
+                  onChange={(e) =>
+                    setForgotForm((prev) => ({ ...prev, emailCode: e.target.value.replace(/\D/g, '').slice(0, 6) }))
+                  }
+                  className="flex-1 px-3 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleSendForgotCode}
+                  disabled={isSendingForgotCode || forgotCodeCountdown > 0}
+                  className="px-3 py-2.5 rounded-xl text-xs font-semibold border border-gray-200 dark:border-slate-700 text-primary-600 dark:text-primary-400 disabled:opacity-50"
+                >
+                  {forgotCodeCountdown > 0 ? `${forgotCodeCountdown}s` : isSendingForgotCode ? '发送中...' : '发送验证码'}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">新密码</label>
+              <input
+                type="password"
+                value={forgotForm.newPassword}
+                onChange={(e) => setForgotForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+                className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+              />
+              <p className="text-xs text-gray-500 dark:text-slate-400 ml-0.5">{PASSWORD_POLICY_HINT}</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">确认新密码</label>
+              <input
+                type="password"
+                value={forgotForm.confirmPassword}
+                onChange={(e) => setForgotForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleResetForgotPassword}
+              disabled={isResettingPassword}
+              className="w-full py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white font-semibold disabled:opacity-60"
+            >
+              {isResettingPassword ? '重置中...' : '重置密码'}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <p className="text-center text-xs text-gray-400 dark:text-slate-500 mt-8">
         © 2024 CQUPT Security Response Center. All rights reserved.
       </p>

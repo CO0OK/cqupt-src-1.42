@@ -24,6 +24,8 @@ export interface Vulnerability {
   date: string;
   description: string;
   attachment?: string;
+  attachmentType?: string;
+  auditNote?: string;
 }
 
 export interface NavItem {
@@ -51,6 +53,7 @@ export interface Material {
   date: string;
   type: 'PDF' | 'Video' | 'Link' | 'Zip';
   url: string;
+  image: string;
   description: string;
 }
 
@@ -70,7 +73,7 @@ export interface Product {
   stock: number;
   category: string;
   image: string;
-  status: 'In Stock' | 'Out of Stock';
+  status: 'Active' | 'Out of Stock' | 'Inactive';
 }
 
 export interface Redemption {

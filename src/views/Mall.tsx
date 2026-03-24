@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User, Product, Redemption } from '../types';
-import { ShoppingBag, Zap, Gift, ChevronRight, History, Package, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { ShoppingBag, Zap, Gift, ChevronRight, History, Package, Clock, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import ConfirmModal from '../components/ConfirmModal';
 
 interface MallProps {
   user: User;
@@ -9,6 +10,7 @@ interface MallProps {
 }
 
 export default function Mall({ user, onUpdateUser }: MallProps) {
+  type Notice = { type: 'success' | 'error'; message: string } | null;
   const [activeTab, setActiveTab] = useState<'items' | 'my_redemptions'>('items');
   const [products, setProducts] = useState<Product[]>([]);
   const [redemptions, setRedemptions] = useState<Redemption[]>([]);
@@ -16,6 +18,8 @@ export default function Mall({ user, onUpdateUser }: MallProps) {
   const [submitting, setSubmitting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState<Product | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const visibleProducts = products.filter((item) => item.status !== 'Inactive');
 
   useEffect(() => {
     fetchData();
@@ -53,13 +57,14 @@ export default function Mall({ user, onUpdateUser }: MallProps) {
         onUpdateUser({ ...user, points: data.userPoints });
         setShowConfirmModal(null);
         setShowSuccessModal(true);
+        setNotice({ type: 'success', message: `兑换成功：${product.name}` });
         fetchData();
       } else {
-        alert(data.message || '兑换失败');
+        setNotice({ type: 'error', message: data.message || '兑换失败' });
       }
     } catch (error) {
       console.error('Redemption error:', error);
-      alert('网络错误，请稍后再试');
+      setNotice({ type: 'error', message: '网络错误，请稍后再试' });
     } finally {
       setSubmitting(false);
     }
@@ -67,6 +72,14 @@ export default function Mall({ user, onUpdateUser }: MallProps) {
 
   return (
     <div className="space-y-8 animate-fade-in">
+      {notice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${notice.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">积分商城</h2>
@@ -97,46 +110,57 @@ export default function Mall({ user, onUpdateUser }: MallProps) {
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-80 bg-gray-100 dark:bg-slate-800 animate-pulse rounded-2xl" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+          {[1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="h-64 bg-gray-100 dark:bg-slate-800 animate-pulse rounded-2xl" />
           ))}
         </div>
       ) : activeTab === 'items' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-          {products.map(item => (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
+          {visibleProducts.map(item => (
             <div key={item.id} className="group bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
               <div className="aspect-square overflow-hidden relative">
                 <img src={item.image} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
-                <div className={`absolute top-4 right-4 px-2 py-1 backdrop-blur-md text-white text-[10px] font-bold rounded uppercase ${item.stock > 0 ? 'bg-black/50' : 'bg-red-500'}`}>
-                  {item.stock > 0 ? `库存: ${item.stock}` : '缺货'}
+                <div className={`absolute top-4 right-4 px-2 py-1 backdrop-blur-md text-white text-[10px] font-bold rounded uppercase ${item.status === 'Active' && item.stock > 0 ? 'bg-black/50' : 'bg-red-500'}`}>
+                  {item.status === 'Inactive' ? '已停用' : item.stock > 0 ? `库存: ${item.stock}` : '缺货'}
                 </div>
               </div>
-              <div className="p-6">
+              <div className="p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-bold text-primary-600 bg-primary-50 dark:bg-primary-900/20 px-2 py-0.5 rounded uppercase">{item.category}</span>
                 </div>
-                <h3 className="font-bold text-gray-900 dark:text-white mb-2">{item.name}</h3>
-                <div className="flex items-center justify-between mt-4">
+                <h3 className="font-bold text-gray-900 dark:text-white mb-1.5 text-sm">{item.name}</h3>
+                <div className="flex items-center justify-between mt-3">
                   <div className="flex items-center gap-1 text-amber-600 font-bold">
                     <Zap className="w-4 h-4" />
                     <span>{item.price}</span>
                   </div>
                   <button 
-                    disabled={item.stock <= 0 || user.points < item.price}
+                    disabled={item.status !== 'Active' || item.stock <= 0 || user.points < item.price}
                     onClick={() => setShowConfirmModal(item)}
                     className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors shadow-lg ${
-                      item.stock > 0 && user.points >= item.price
+                      item.status === 'Active' && item.stock > 0 && user.points >= item.price
                         ? 'bg-primary-600 hover:bg-primary-700 text-white shadow-primary-500/20'
                         : 'bg-gray-100 dark:bg-slate-800 text-gray-400 cursor-not-allowed'
                     }`}
                   >
-                    {item.stock <= 0 ? '已售罄' : user.points < item.price ? '积分不足' : '立即兑换'}
+                    {item.status !== 'Active'
+                      ? '暂不可兑换'
+                      : item.stock <= 0
+                        ? '已售罄'
+                        : user.points < item.price
+                          ? '积分不足'
+                          : '立即兑换'}
                   </button>
                 </div>
               </div>
             </div>
           ))}
+          {visibleProducts.length === 0 ? (
+            <div className="col-span-full p-10 text-center bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 text-sm text-gray-500 dark:text-slate-400">
+              当前暂无可兑换商品
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm overflow-hidden">
@@ -215,56 +239,23 @@ export default function Mall({ user, onUpdateUser }: MallProps) {
         </button>
       </div>
 
-      {/* Confirmation Modal */}
-      <AnimatePresence>
-        {showConfirmModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
-            >
-              <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex items-center gap-3">
-                <div className="p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
-                  <AlertCircle className="w-6 h-6 text-amber-600" />
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">确认兑换</h3>
-              </div>
-              <div className="p-6 space-y-4">
-                <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                  <img src={showConfirmModal.image} alt={showConfirmModal.name} className="w-16 h-16 rounded-lg object-cover" />
-                  <div>
-                    <p className="font-bold text-gray-900 dark:text-white">{showConfirmModal.name}</p>
-                    <p className="text-sm text-amber-600 font-bold flex items-center gap-1">
-                      <Zap className="w-3.5 h-3.5" />
-                      {showConfirmModal.price} 积分
-                    </p>
-                  </div>
-                </div>
-                <p className="text-sm text-gray-500 dark:text-slate-400">
-                  兑换后将扣除相应积分，请确认您的选择。兑换成功后请前往指定地点领取。
-                </p>
-              </div>
-              <div className="p-6 bg-gray-50 dark:bg-slate-800/50 flex justify-end gap-3">
-                <button 
-                  onClick={() => setShowConfirmModal(null)}
-                  className="px-4 py-2 text-gray-600 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                >
-                  取消
-                </button>
-                <button 
-                  disabled={submitting}
-                  onClick={() => handleRedeem(showConfirmModal)}
-                  className="px-6 py-2 bg-primary-600 text-white rounded-xl font-semibold hover:bg-primary-700 transition-all shadow-lg shadow-primary-600/20 flex items-center gap-2"
-                >
-                  {submitting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : '确认兑换'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ConfirmModal
+        open={!!showConfirmModal}
+        title="确认兑换"
+        description="兑换后将扣除对应积分，提交后请前往指定地点领取。"
+        highlightText={
+          showConfirmModal
+            ? `${showConfirmModal.name} · ${showConfirmModal.price} 积分`
+            : ''
+        }
+        confirmText={submitting ? '提交中...' : '确认兑换'}
+        confirmDisabled={submitting}
+        onCancel={() => setShowConfirmModal(null)}
+        onConfirm={() => {
+          if (!showConfirmModal) return;
+          return handleRedeem(showConfirmModal);
+        }}
+      />
 
       {/* Success Modal */}
       <AnimatePresence>

@@ -16,7 +16,8 @@ import MyVulnerabilities from './MyVulnerabilities';
 import CertificateSearch from './CertificateSearch';
 import Logs from './Logs';
 import LearningCenter from './LearningCenter';
-import ProfileModal from '../components/ProfileModal';
+import LearningManage from './LearningManage';
+import ProfileCenter from './ProfileCenter';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, FileText, ShieldAlert, CheckCircle } from 'lucide-react';
 
@@ -30,8 +31,6 @@ interface DashboardProps {
 
 export default function Dashboard({ user, onLogout, onUpdateUser, isDarkMode, toggleTheme }: DashboardProps) {
   const [activeTab, setActiveTab] = useState('home');
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [modalType, setModalType] = useState<'profile' | 'password' | 'avatar'>('profile');
   const [showResponsibilityModal, setShowResponsibilityModal] = useState(false);
   const [isSigning, setIsSigning] = useState(false);
 
@@ -75,14 +74,11 @@ export default function Dashboard({ user, onLogout, onUpdateUser, isDarkMode, to
       case 'mall': return <Mall user={user} onUpdateUser={onUpdateUser} />;
       case 'leaderboard': return <Leaderboard />;
       case 'learning': return <LearningCenter user={user} />;
+      case 'learning_manage': return <LearningManage />;
       case 'logs': return <Logs />;
+      case 'profile_center': return <ProfileCenter user={user} onUpdateUser={onUpdateUser} />;
       default: return <div className="p-8 text-center opacity-50">模块开发中...</div>;
     }
-  };
-
-  const openModal = (type: 'profile' | 'password' | 'avatar') => {
-    setModalType(type);
-    setShowProfileModal(true);
   };
 
   return (
@@ -94,7 +90,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser, isDarkMode, to
         onLogout={onLogout}
         isDarkMode={isDarkMode}
         toggleTheme={toggleTheme}
-        openModal={openModal}
       />
       
       <main className="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -118,14 +113,6 @@ export default function Dashboard({ user, onLogout, onUpdateUser, isDarkMode, to
           </p>
         </div>
       </footer>
-
-      {showProfileModal && (
-        <ProfileModal 
-          user={user} 
-          type={modalType} 
-          onClose={() => setShowProfileModal(false)} 
-        />
-      )}
 
       {/* Responsibility Statement Modal */}
       <AnimatePresence>

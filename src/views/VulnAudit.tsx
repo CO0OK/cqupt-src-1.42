@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Vulnerability } from '../types';
-import { Search, Filter, ChevronRight, X, Shield, Globe, AlertTriangle, FileText, CheckCircle, Ban, ClipboardCheck } from 'lucide-react';
+import { Search, Filter, ChevronRight, X, Shield, Globe, AlertTriangle, FileText, CheckCircle, Ban, ClipboardCheck, Eye, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getApiErrorMessage } from '../utils/apiError';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function VulnAudit() {
+  type AuditField = 'status' | 'auditNote' | 'body';
+  type ValidationIssue = { field?: string; reason?: string };
+  type Notice = { type: 'success' | 'error'; message: string } | null;
   const [vulns, setVulns] = useState<Vulnerability[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -17,15 +22,70 @@ export default function VulnAudit() {
   const [sortBy, setSortBy] = useState('date_desc');
   const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
   const [auditNote, setAuditNote] = useState('');
+  const [auditFieldErrors, setAuditFieldErrors] = useState<Partial<Record<AuditField, string>>>({});
+  const [auditSubmitError, setAuditSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
+  const canPreviewAttachment = (mimeType?: string) =>
+    ['application/pdf', 'image/png', 'image/jpeg', 'text/plain'].includes(mimeType || '');
+
+  const reasonLabelMap: Record<string, string> = {
+    'must be string|null': '必须为字符串或空',
+    'length must be <= 2000': '长度不能超过 2000',
+    'must be non-empty string': '不能为空',
+    'must be 待处理|审核中|已审核|修复中|已修复|已忽略|已隐藏': '状态值不合法',
+    'at least one field is required': '至少提供一个字段',
+    'no valid updatable field provided': '没有可更新字段',
+  };
+
+  const fieldLabelMap: Record<AuditField, string> = {
+    status: '漏洞状态',
+    auditNote: '审核意见',
+    body: '表单',
+  };
+
+  const mapAuditFieldErrors = (payload: unknown): Partial<Record<AuditField, string>> => {
+    const details = Array.isArray((payload as { details?: unknown })?.details)
+      ? ((payload as { details: unknown[] }).details as ValidationIssue[])
+      : [];
+    const mapped: Partial<Record<AuditField, string>> = {};
+
+    details.forEach((item) => {
+      const rawField = typeof item.field === 'string' ? item.field : 'body';
+      const field = (['status', 'auditNote', 'body'].includes(rawField) ? rawField : 'body') as AuditField;
+      const reason = typeof item.reason === 'string' ? item.reason : '参数不合法';
+      const label = reasonLabelMap[reason] || reason;
+      if (!mapped[field]) {
+        mapped[field] = `${fieldLabelMap[field]}：${label}`;
+      }
+    });
+
+    return mapped;
+  };
+
+  const parseError = async (res: Response, fallback: string) => {
+    let data: unknown = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+    return getApiErrorMessage(data, fallback, res.status);
+  };
 
   const fetchVulns = async () => {
     try {
       const res = await fetch('/api/vulnerabilities');
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '获取待审核漏洞失败') });
+        return;
+      }
       const data = await res.json();
       setVulns(data.filter((v: Vulnerability) => v.status === '待处理'));
     } catch (err) {
       console.error('Failed to fetch vulnerabilities:', err);
+      setNotice({ type: 'error', message: '网络异常，获取待审核漏洞失败' });
     }
   };
 
@@ -86,9 +146,11 @@ export default function VulnAudit() {
   const handleAudit = async (status: string) => {
     if (!selectedVuln) return;
     if (!auditNote.trim()) {
-      alert('请填写审核意见');
+      setAuditFieldErrors({ auditNote: '审核意见：不能为空' });
       return;
     }
+    setAuditFieldErrors({});
+    setAuditSubmitError('');
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/vulnerabilities/${selectedVuln.id}`, {
@@ -96,13 +158,30 @@ export default function VulnAudit() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, auditNote }),
       });
-      if (res.ok) {
-        fetchVulns();
-        setSelectedVuln(null);
-        setAuditNote('');
+      if (!res.ok) {
+        let data: unknown = {};
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+        const mapped = mapAuditFieldErrors(data);
+        if (Object.keys(mapped).length > 0) {
+          setAuditFieldErrors(mapped);
+        } else {
+          setAuditSubmitError(getApiErrorMessage(data, '漏洞审核提交失败', res.status));
+        }
+        return;
       }
+      await fetchVulns();
+      setNotice({ type: 'success', message: `漏洞 ${selectedVuln.id} 审核结果已提交` });
+      setSelectedVuln(null);
+      setAuditNote('');
+      setAuditFieldErrors({});
+      setAuditSubmitError('');
     } catch (err) {
       console.error('Audit failed:', err);
+      setAuditSubmitError('网络异常，漏洞审核提交失败');
     } finally {
       setIsSubmitting(false);
     }
@@ -110,6 +189,14 @@ export default function VulnAudit() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {notice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${notice.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-gray-100 dark:border-slate-800 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -120,39 +207,18 @@ export default function VulnAudit() {
               </h2>
               <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">审核并评估白帽子提交的潜在威胁，确保校园网络安全</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <div className="relative">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[260px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                 <input 
                   type="text" 
                   placeholder="搜索标题、ID或提交者..." 
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 dark:text-white w-64 focus:ring-2 focus:ring-primary-500 outline-none transition-all" 
+                  className="w-full pl-10 pr-4 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all"
                 />
               </div>
-              <button 
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-xs font-bold transition-all ${showAdvanced ? 'bg-primary-50 border-primary-200 text-primary-600 dark:bg-primary-900/20 dark:border-primary-800' : 'bg-white border-gray-200 text-gray-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400'}`}
-              >
-                <Filter className="w-3.5 h-3.5" />
-                高级筛选
-              </button>
-              <select 
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                <option value="date_desc">日期降序</option>
-                <option value="date_asc">日期升序</option>
-                <option value="level_desc">等级降序</option>
-                <option value="level_asc">等级升序</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-4 items-center">
-            <div className="flex bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
+              <div className="flex items-center bg-gray-100 dark:bg-slate-800 p-1 rounded-xl">
               <button 
                 onClick={() => setSimpleFilter('all')}
                 className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${simpleFilter === 'all' ? 'bg-white dark:bg-slate-700 text-primary-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-slate-300'}`}
@@ -171,6 +237,14 @@ export default function VulnAudit() {
               >
                 今日提交
               </button>
+              </div>
+              <button 
+                onClick={() => setShowAdvanced(!showAdvanced)}
+                className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-xl border transition-all ${showAdvanced ? 'bg-primary-50 border-primary-200 text-primary-600 dark:bg-primary-900/20 dark:border-primary-800' : 'bg-white border-gray-200 text-gray-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400'}`}
+              >
+                <Filter className="w-4 h-4" />
+                高级筛选
+              </button>
             </div>
           </div>
 
@@ -182,7 +256,7 @@ export default function VulnAudit() {
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-hidden"
               >
-                <div className="bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-800 rounded-2xl p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-gray-50 dark:bg-slate-800/50 border border-gray-200 dark:border-slate-800 rounded-2xl p-6 grid grid-cols-1 md:grid-cols-5 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">危险等级</label>
                     <select 
@@ -214,6 +288,19 @@ export default function VulnAudit() {
                     </select>
                   </div>
                   <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">排序方式</label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                    >
+                      <option value="date_desc">日期降序</option>
+                      <option value="date_asc">日期升序</option>
+                      <option value="level_desc">等级降序</option>
+                      <option value="level_asc">等级升序</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">开始日期</label>
                     <input 
                       type="date"
@@ -231,7 +318,7 @@ export default function VulnAudit() {
                       className="w-full px-4 py-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
                     />
                   </div>
-                  <div className="md:col-span-4 flex justify-end">
+                  <div className="md:col-span-5 flex justify-end">
                     <button 
                       onClick={() => {
                         setAdvancedFilters({ level: '全部', type: '全部', startDate: '', endDate: '' });
@@ -291,7 +378,12 @@ export default function VulnAudit() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button 
-                      onClick={() => setSelectedVuln(vuln)}
+                      onClick={() => {
+                        setSelectedVuln(vuln);
+                        setAuditNote('');
+                        setAuditFieldErrors({});
+                        setAuditSubmitError('');
+                      }}
                       className="bg-primary-600 text-white px-4 py-1.5 rounded-xl text-xs font-bold hover:bg-primary-700 shadow-lg shadow-primary-600/20 transition-all active:scale-95"
                     >
                       立即审核
@@ -382,6 +474,35 @@ export default function VulnAudit() {
                   </div>
                 </div>
 
+                {selectedVuln.attachment ? (
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-gray-700 dark:text-slate-300">附件材料</p>
+                    <div className="p-4 bg-gray-50 dark:bg-slate-950 rounded-2xl border border-gray-100 dark:border-slate-800 space-y-3">
+                      <p className="text-sm text-gray-700 dark:text-slate-300">{selectedVuln.attachment}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {canPreviewAttachment(selectedVuln.attachmentType) ? (
+                          <button
+                            onClick={() => window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=preview`, '_blank', 'noopener')}
+                            className="px-3 py-2 text-xs font-bold rounded-xl border border-primary-200 text-primary-700 bg-primary-50 hover:bg-primary-100 transition-all inline-flex items-center gap-1"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> 安全预览
+                          </button>
+                        ) : (
+                          <span className="px-3 py-2 text-xs rounded-xl border border-amber-200 text-amber-700 bg-amber-50">
+                            该格式不支持在线预览，请下载后本地查看
+                          </span>
+                        )}
+                        <button
+                          onClick={() => window.open(`/api/vulnerabilities/${encodeURIComponent(selectedVuln.id)}/attachment?mode=download`, '_blank', 'noopener')}
+                          className="px-3 py-2 text-xs font-bold rounded-xl border border-gray-200 text-gray-700 bg-white hover:bg-gray-100 transition-all inline-flex items-center gap-1"
+                        >
+                          <Download className="w-3.5 h-3.5" /> 下载附件
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-gray-700 dark:text-slate-300 flex items-center gap-1">
                     <AlertTriangle className="w-4 h-4" /> 审核意见
@@ -389,30 +510,48 @@ export default function VulnAudit() {
                   <textarea 
                     rows={3}
                     value={auditNote}
-                    onChange={(e) => setAuditNote(e.target.value)}
+                    onChange={(e) => {
+                      setAuditNote(e.target.value);
+                      setAuditSubmitError('');
+                      setAuditFieldErrors((prev) => {
+                        if (!prev.auditNote) return prev;
+                        const next = { ...prev };
+                        delete next.auditNote;
+                        return next;
+                      });
+                    }}
                     placeholder="请输入审核意见、修复建议或驳回原因..." 
-                    className="w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm resize-none"
+                    className={`w-full px-4 py-3 bg-gray-50 dark:bg-slate-800 border rounded-2xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm resize-none ${auditFieldErrors.auditNote ? 'border-red-300 dark:border-red-600' : 'border-gray-200 dark:border-slate-700'}`}
                   />
+                  {auditFieldErrors.auditNote ? (
+                    <p className="text-xs text-red-600">{auditFieldErrors.auditNote}</p>
+                  ) : null}
+                  {auditFieldErrors.body ? (
+                    <p className="text-xs text-red-600">{auditFieldErrors.body}</p>
+                  ) : null}
+                  {auditSubmitError ? (
+                    <p className="text-xs text-red-600">{auditSubmitError}</p>
+                  ) : null}
                 </div>
               </div>
 
               <div className="p-6 border-t border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-900/50 flex flex-wrap gap-3">
                 <button 
-                  onClick={() => handleAudit('已忽略')}
+                  onClick={() => setConfirmStatus('已忽略')}
                   disabled={isSubmitting}
                   className="flex-1 min-w-[120px] py-3 bg-white dark:bg-slate-800 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30 font-bold rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <Ban className="w-4 h-4" /> 忽略/驳回
                 </button>
                 <button 
-                  onClick={() => handleAudit('修复中')}
+                  onClick={() => setConfirmStatus('修复中')}
                   disabled={isSubmitting}
                   className="flex-1 min-w-[120px] py-3 bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 border border-amber-100 dark:border-amber-900/30 font-bold rounded-xl hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <AlertTriangle className="w-4 h-4" /> 确认/修复中
                 </button>
                 <button 
-                  onClick={() => handleAudit('已审核')}
+                  onClick={() => setConfirmStatus('已审核')}
                   disabled={isSubmitting}
                   className="flex-1 min-w-[120px] py-3 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-600/20 hover:bg-primary-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
@@ -423,6 +562,26 @@ export default function VulnAudit() {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmModal
+        open={!!confirmStatus}
+        title="确认提交审核结论"
+        description="提交后将写入审核记录，并推动漏洞状态流转。"
+        highlightText={
+          confirmStatus && selectedVuln
+            ? `${selectedVuln.id} · ${selectedVuln.title} · ${confirmStatus}`
+            : ''
+        }
+        confirmText={isSubmitting ? '提交中...' : '确认提交'}
+        confirmDisabled={isSubmitting}
+        onCancel={() => setConfirmStatus(null)}
+        onConfirm={async () => {
+          if (!confirmStatus) return;
+          const status = confirmStatus;
+          setConfirmStatus(null);
+          await handleAudit(status);
+        }}
+      />
     </div>
   );
 }

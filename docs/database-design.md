@@ -417,33 +417,3 @@ products
 2. 先继续细化“字段枚举、状态流转、约束规则”
 
 如果你要我继续，我建议下一步直接做 `Prisma schema`，这样就能进入真实后端开发。 
-
-
-
-记忆文件地址
-能看到，本地就在你的用户目录下。
-
-  主要位置：
-
-  - 会话文件：/home/cocking/.codex/sessions/2026/03/19/
-  - 当前这次会话很可能是：/home/cocking/.codex/sessions/2026/03/19/rollout-2026-03-19T14-40-45-019d04d3-3a8c-7a73-90e8-
-    48039ba99afb.jsonl
-  - 历史索引：/home/cocking/.codex/history.jsonl
-
-  主要位置：
-
-  - 会话文件：/home/cocking/.codex/sessions/2026/03/19/
-  - 当前这次会话很可能是：/home/cocking/.codex/sessions/2026/03/19/rollout-2026-03-19T14-40-45-019d04d3-3a8c-7a73-90e8-
-    48039ba99afb.jsonl
-  - 历史索引：/home/cocking/.codex/history.jsonl
-
-  - 会话文件：/home/cocking/.codex/sessions/2026/03/19/
-  - 当前这次会话很可能是：/home/cocking/.codex/sessions/2026/03/19/rollout-2026-03-19T14-40-45-019d04d3-3a8c-7a73-90e8-
-    48039ba99afb.jsonl
-  - 历史索引：/home/cocking/.codex/history.jsonl
-
-  如果你只是想导出，最直接就是复制对应的 jsonl 文件。
-  如果想快速看内容，可以用：
-  sed -n '1,120p' /home/cocking/.codex/sessions/2026/03/19/rollout-2026-03-19T14-40-45-019d04d3-3a8c-7a73-90e8-48039ba99afb.jsonl   
-  export.jsonl
-  如果你要，我也可以下一步直接帮你把这次会话整理成一份更好读的 markdown 导出。

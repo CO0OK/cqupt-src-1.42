@@ -1,5 +1,5 @@
-@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -30,10 +30,11 @@
   }
 
   select {
-    @apply appearance-none bg-no-repeat bg-right pr-10 cursor-pointer transition-all duration-200;
+    @apply appearance-none bg-no-repeat bg-right cursor-pointer transition-all duration-200;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%236B7280' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
     background-size: 1.25rem;
-    background-position: right 0.75rem center;
+    background-position: right 0.625rem center;
+    padding-right: 2.5rem !important;
   }
 
   .dark select {

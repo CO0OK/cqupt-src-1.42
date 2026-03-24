@@ -116,6 +116,8 @@ model User {
   issuedCertificates       Certificate[]        @relation("CertificateIssuer")
   redemptions              Redemption[]         @relation("RedemptionUser")
   issuedRedemptions        Redemption[]         @relation("RedemptionIssuer")
+  discussions              Discussion[]
+  activityLogs             ActivityLog[]
 
   @@index([role])
   @@index([status])
@@ -272,4 +274,73 @@ model Redemption {
   @@index([productId])
   @@index([status])
   @@map("redemptions")
+}
+
+model LearningLab {
+  id           String   @id @default(uuid()) @db.Uuid
+  title        String   @db.VarChar(255)
+  description  String
+  difficulty   String   @db.VarChar(20)
+  category     String   @db.VarChar(50)
+  pointsReward Int      @default(0) @map("points_reward")
+  url          String
+  imageUrl     String?  @map("image_url")
+  status       String   @default("published") @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("learning_labs")
+}
+
+model LearningMaterial {
+  id           String   @id @default(uuid()) @db.Uuid
+  title        String   @db.VarChar(255)
+  authorName   String   @map("author_name") @db.VarChar(120)
+  materialType String   @map("material_type") @db.VarChar(30)
+  url          String
+  imageUrl     String?  @map("image_url")
+  description  String?
+  status       String   @default("published") @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("learning_materials")
+}
+
+model Discussion {
+  id         String   @id @default(uuid()) @db.Uuid
+  title      String   @db.VarChar(255)
+  authorId   String   @map("author_id") @db.Uuid
+  category   String   @db.VarChar(50)
+  content    String?
+  replyCount Int      @default(0) @map("reply_count")
+  status     String   @default("published") @db.VarChar(20)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  author     User     @relation(fields: [authorId], references: [id])
+
+  @@index([authorId])
+  @@map("discussions")
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String   @db.VarChar(80)
+  targetType String?  @map("target_type") @db.VarChar(50)
+  targetId   String?  @map("target_id") @db.VarChar(120)
+  detail     String?
+  status     String   @default("success") @db.VarChar(20)
+  ip         String?  @db.VarChar(64)
+  userAgent  String?  @map("user_agent") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor      User?    @relation(fields: [actorId], references: [id])
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@index([action, createdAt])
+  @@map("activity_logs")
 }

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Award, Search, Plus, Trash2, Download, ExternalLink, Filter, X, CheckCircle, Shield } from 'lucide-react';
+import { Award, Search, Plus, Trash2, Download, Filter, X, CheckCircle, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Vulnerability } from '../types';
+import { getApiErrorMessage } from '../utils/apiError';
+import ConfirmModal from '../components/ConfirmModal';
 
 interface Certificate {
   id: string;
@@ -14,6 +16,7 @@ interface Certificate {
 }
 
 export default function CertificateManage() {
+  type Notice = { type: 'success' | 'error'; message: string } | null;
   const [certs, setCerts] = useState<Certificate[]>([]);
   const [vulns, setVulns] = useState<Vulnerability[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -27,11 +30,24 @@ export default function CertificateManage() {
   });
   const [sortBy, setSortBy] = useState('date_desc');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Certificate | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [confirmIssueOpen, setConfirmIssueOpen] = useState(false);
   
   // Form state
   const [selectedVulnId, setSelectedVulnId] = useState('');
   const [certType, setCertType] = useState<'Honorary' | 'Outstanding' | 'Special'>('Honorary');
+
+  const parseError = async (res: Response, fallback: string) => {
+    let data: unknown = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+    return getApiErrorMessage(data, fallback, res.status);
+  };
 
   const fetchData = async () => {
     try {
@@ -39,17 +55,27 @@ export default function CertificateManage() {
         fetch('/api/certificates'),
         fetch('/api/vulnerabilities')
       ]);
+      if (!certsRes.ok) {
+        setNotice({ type: 'error', message: await parseError(certsRes, '获取证书列表失败') });
+        return;
+      }
+      if (!vulnsRes.ok) {
+        setNotice({ type: 'error', message: await parseError(vulnsRes, '获取漏洞列表失败') });
+        return;
+      }
       const certsData = await certsRes.json();
       const vulnsData = await vulnsRes.json();
-      setCerts(certsData);
+      setCerts(Array.isArray(certsData) ? certsData : []);
       // Only show approved vulnerabilities that don't have a certificate yet
-      const approvedVulns = vulnsData.filter((v: Vulnerability) => 
+      const safeVulns = Array.isArray(vulnsData) ? vulnsData : [];
+      const approvedVulns = safeVulns.filter((v: Vulnerability) => 
         (v.status === '已审核' || v.status === '已修复' || v.status === '修复中') && 
-        !certsData.some((c: Certificate) => c.vulnId === v.id)
+        (Array.isArray(certsData) ? certsData : []).every((c: Certificate) => c.vulnId !== v.id)
       );
       setVulns(approvedVulns);
     } catch (err) {
       console.error('Failed to fetch data:', err);
+      setNotice({ type: 'error', message: '网络异常，获取证书数据失败' });
     }
   };
 
@@ -74,30 +100,43 @@ export default function CertificateManage() {
           type: certType
         })
       });
-      if (res.ok) {
-        fetchData();
-        setShowAddModal(false);
-        setSelectedVulnId('');
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '颁发证书失败') });
+        return;
       }
+      await fetchData();
+      setShowAddModal(false);
+      setSelectedVulnId('');
+      setNotice({ type: 'success', message: `证书已颁发：${vuln.id}` });
     } catch (err) {
       console.error(err);
+      setNotice({ type: 'error', message: '网络异常，颁发证书失败' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleDeleteCert = async (id: string) => {
-    if (!confirm('确定要删除/撤销此证书吗？')) return;
     try {
       const res = await fetch(`/api/certificates/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchData();
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '删除证书失败') });
+        return;
+      }
+      await fetchData();
+      setNotice({ type: 'success', message: `证书 ${id} 已删除` });
     } catch (err) {
       console.error(err);
+      setNotice({ type: 'error', message: '网络异常，删除证书失败' });
     }
   };
 
   const handleDownloadCert = (id: string) => {
     window.open(`/api/certificates/${encodeURIComponent(id)}/pdf`, '_blank');
+  };
+
+  const handlePreviewCert = (id: string) => {
+    window.open(`/api/certificates/${encodeURIComponent(id)}/pdf?mode=preview`, '_blank');
   };
 
   const filteredCerts = useMemo(() => {
@@ -162,6 +201,14 @@ export default function CertificateManage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {notice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium ${notice.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -220,17 +267,6 @@ export default function CertificateManage() {
             <Filter className="w-4 h-4" />
             高级筛选
           </button>
-
-          <select 
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="px-4 py-2.5 bg-gray-50 dark:bg-slate-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-primary-500 transition-all dark:text-white outline-none"
-          >
-            <option value="date_desc">日期降序</option>
-            <option value="date_asc">日期升序</option>
-            <option value="type">按类型</option>
-            <option value="username">按用户名</option>
-          </select>
         </div>
 
         <AnimatePresence>
@@ -241,7 +277,7 @@ export default function CertificateManage() {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50"
             >
-              <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">证书类型</label>
                   <select 
@@ -265,6 +301,19 @@ export default function CertificateManage() {
                     <option value="全部">全部状态</option>
                     <option value="Active">正常</option>
                     <option value="Revoked">已撤销</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">排序方式</label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="date_desc">日期降序</option>
+                    <option value="date_asc">日期升序</option>
+                    <option value="type">按类型</option>
+                    <option value="username">按用户名</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -345,6 +394,13 @@ export default function CertificateManage() {
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button
+                        onClick={() => handlePreviewCert(cert.id)}
+                        className="px-2.5 py-1 text-xs font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-all"
+                        title="预览"
+                      >
+                        预览
+                      </button>
+                      <button
                         onClick={() => handleDownloadCert(cert.id)}
                         className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-xl transition-all"
                         title="下载"
@@ -352,7 +408,7 @@ export default function CertificateManage() {
                         <Download className="w-4 h-4" />
                       </button>
                       <button 
-                        onClick={() => handleDeleteCert(cert.id)}
+                        onClick={() => setDeleteTarget(cert)}
                         className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all" 
                         title="删除"
                       >
@@ -458,7 +514,7 @@ export default function CertificateManage() {
                   取消
                 </button>
                 <button 
-                  onClick={handleIssueCert}
+                  onClick={() => setConfirmIssueOpen(true)}
                   disabled={isSubmitting || !selectedVulnId}
                   className="flex-1 py-3 bg-primary-600 text-white font-bold rounded-xl shadow-lg shadow-primary-600/20 hover:bg-primary-700 transition-all disabled:opacity-50"
                 >
@@ -469,6 +525,39 @@ export default function CertificateManage() {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="确认删除证书"
+        description="删除/撤销后将影响证书记录，请确认是否继续。"
+        highlightText={deleteTarget ? `${deleteTarget.id} · ${deleteTarget.title}` : ''}
+        confirmText="确认删除"
+        danger
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          await handleDeleteCert(deleteTarget.id);
+          setDeleteTarget(null);
+        }}
+      />
+
+      <ConfirmModal
+        open={confirmIssueOpen}
+        title="确认颁发证书"
+        description="颁发后将创建正式证书记录并可供下载。"
+        highlightText={
+          selectedVulnId
+            ? `${selectedVulnId} · ${getTypeText(certType)}`
+            : ''
+        }
+        confirmText={isSubmitting ? '颁发中...' : '确认颁发'}
+        confirmDisabled={isSubmitting || !selectedVulnId}
+        onCancel={() => setConfirmIssueOpen(false)}
+        onConfirm={async () => {
+          setConfirmIssueOpen(false);
+          await handleIssueCert();
+        }}
+      />
     </div>
   );
 }

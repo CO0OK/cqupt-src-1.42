@@ -2,8 +2,17 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { User } from '../types';
 import { Search, UserPlus, Shield, Lock, Edit2, Trash2, X, CheckCircle, AlertCircle, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getApiErrorMessage } from '../utils/apiError';
+import ConfirmModal from '../components/ConfirmModal';
+import { PASSWORD_POLICY_HINT, validatePasswordPolicyText } from '../utils/passwordPolicy';
 
 export default function UserManage() {
+  type Notice = { type: 'success' | 'error'; message: string } | null;
+  type ConfirmAction =
+    | { kind: 'add_user' }
+    | { kind: 'update_user' }
+    | { kind: 'reset_password'; username: string }
+    | null;
   const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -21,6 +30,8 @@ export default function UserManage() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [newUser, setNewUser] = useState({
     username: '',
     email: '',
@@ -30,18 +41,40 @@ export default function UserManage() {
     status: 'Active' as User['status']
   });
 
-  const fetchUsers = () => {
-    fetch('/api/users')
-      .then(res => res.json())
-      .then(data => setUsers(data));
+  const parseError = async (res: Response, fallback: string) => {
+    let data: unknown = {};
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+    return getApiErrorMessage(data, fallback, res.status);
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch('/api/users');
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '获取用户列表失败') });
+        return;
+      }
+      const data = await res.json();
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error(error);
+      setNotice({ type: 'error', message: '网络异常，获取用户列表失败' });
+    }
   };
 
   useEffect(() => {
     fetchUsers();
   }, []);
 
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitAddUser = async () => {
+    if (!/^\d{7}$/.test(newUser.authCode.trim())) {
+      setNotice({ type: 'error', message: '统一认证码需为7位数字' });
+      return;
+    }
     setIsSubmitting(true);
     try {
       const res = await fetch('/api/users', {
@@ -49,28 +82,47 @@ export default function UserManage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser)
       });
-      if (res.ok) {
-        fetchUsers();
-        setShowAddModal(false);
-        setNewUser({
-          username: '',
-          email: '',
-          role: 'user',
-          authCode: '',
-          points: 0,
-          status: 'Active'
-        });
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '新增用户失败') });
+        return;
       }
+      const data = await res.json().catch(() => ({}));
+      await fetchUsers();
+      setShowAddModal(false);
+      const initialPassword = typeof data?.initialPassword === 'string' ? data.initialPassword : '';
+      setNotice({
+        type: 'success',
+        message: initialPassword
+          ? `用户 ${newUser.username} 新增成功，初始密码：${initialPassword}`
+          : `用户 ${newUser.username} 新增成功`,
+      });
+      setNewUser({
+        username: '',
+        email: '',
+        role: 'user',
+        authCode: '',
+        points: 0,
+        status: 'Active'
+      });
     } catch (err) {
       console.error(err);
+      setNotice({ type: 'error', message: '网络异常，新增用户失败' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleUpdateUser = async (e: React.FormEvent) => {
+  const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
+    setConfirmAction({ kind: 'add_user' });
+  };
+
+  const submitUpdateUser = async () => {
     if (!selectedUser) return;
+    if (!/^\d{7}$/.test(selectedUser.authCode.trim())) {
+      setNotice({ type: 'error', message: '统一认证码需为7位数字' });
+      return;
+    }
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/users/${selectedUser.id}`, {
@@ -79,22 +131,38 @@ export default function UserManage() {
         body: JSON.stringify({
           email: selectedUser.email,
           authCode: selectedUser.authCode,
+          points: Math.max(0, Number(selectedUser.points) || 0),
           status: selectedUser.status
         })
       });
-      if (res.ok) {
-        fetchUsers();
-        setShowEditModal(false);
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '更新用户失败') });
+        return;
       }
+      await fetchUsers();
+      setShowEditModal(false);
+      setNotice({ type: 'success', message: `用户 ${selectedUser.username} 信息已更新` });
     } catch (err) {
       console.error(err);
+      setNotice({ type: 'error', message: '网络异常，更新用户失败' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleResetPassword = async () => {
+  const handleUpdateUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    setConfirmAction({ kind: 'update_user' });
+  };
+
+  const submitResetPassword = async () => {
     if (!selectedUser) return;
+    const issue = validatePasswordPolicyText(newPassword);
+    if (issue) {
+      setNotice({ type: 'error', message: issue });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/users/${selectedUser.id}/reset-password`, {
@@ -102,13 +170,19 @@ export default function UserManage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPassword })
       });
-      if (res.ok) {
-        alert('密码重置成功');
-        setShowResetModal(false);
-        setNewPassword('');
+      if (!res.ok) {
+        setNotice({ type: 'error', message: await parseError(res, '密码重置失败') });
+        return;
       }
+      setNotice({
+        type: 'success',
+        message: `用户 ${selectedUser.username} 密码重置成功`,
+      });
+      setShowResetModal(false);
+      setNewPassword('');
     } catch (err) {
       console.error(err);
+      setNotice({ type: 'error', message: '网络异常，密码重置失败' });
     } finally {
       setIsSubmitting(false);
     }
@@ -162,6 +236,15 @@ export default function UserManage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {notice ? (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm font-medium flex items-center gap-2 ${notice.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}
+        >
+          {notice.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          <span>{notice.message}</span>
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">用户管理中心</h2>
@@ -196,7 +279,7 @@ export default function UserManage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input 
               type="text" 
-              placeholder="搜索用户名、认证码或邮箱..." 
+              placeholder="搜索用户名、统一认证码或邮箱..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-sm rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 dark:text-white focus:ring-2 focus:ring-primary-500 outline-none transition-all" 
@@ -231,19 +314,6 @@ export default function UserManage() {
             <Filter className="w-4 h-4 text-gray-400" />
             高级筛选
           </button>
-
-          <select 
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="rounded-xl border border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-950 text-sm text-gray-700 dark:text-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-primary-500 transition-all"
-          >
-            <option value="username">用户名排序</option>
-            <option value="points_desc">积分降序</option>
-            <option value="points_asc">积分升序</option>
-            <option value="role">角色排序</option>
-            <option value="date_desc">注册时间降序</option>
-            <option value="date_asc">注册时间升序</option>
-          </select>
         </div>
 
         <AnimatePresence>
@@ -254,7 +324,7 @@ export default function UserManage() {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900/50"
             >
-              <div className="p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">角色类型</label>
                   <select 
@@ -278,6 +348,21 @@ export default function UserManage() {
                     <option value="全部">全部状态</option>
                     <option value="Active">正常</option>
                     <option value="Banned">封禁</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-500 uppercase ml-1">排序方式</label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-950 dark:text-white outline-none focus:ring-2 focus:ring-primary-500 appearance-none"
+                  >
+                    <option value="username">用户名排序</option>
+                    <option value="points_desc">积分降序</option>
+                    <option value="points_asc">积分升序</option>
+                    <option value="role">角色排序</option>
+                    <option value="date_desc">注册时间降序</option>
+                    <option value="date_asc">注册时间升序</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -319,7 +404,7 @@ export default function UserManage() {
                 <th className="px-6 py-4">用户头像</th>
                 <th className="px-6 py-4">用户名</th>
                 <th className="px-6 py-4">角色</th>
-                <th className="px-6 py-4">认证码</th>
+                <th className="px-6 py-4">统一认证码</th>
                 <th className="px-6 py-4">积分</th>
                 <th className="px-6 py-4">注册日期</th>
                 <th className="px-6 py-4">账号状态</th>
@@ -357,7 +442,7 @@ export default function UserManage() {
                       <button 
                         onClick={() => { setSelectedUser(u); setShowResetModal(true); }}
                         className="p-1.5 rounded-lg border border-gray-200 dark:border-slate-800 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors text-gray-400 hover:text-amber-600"
-                        title="重置密码"
+                        title="修改密码"
                       >
                         <Lock className="w-4 h-4" />
                       </button>
@@ -422,14 +507,15 @@ export default function UserManage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">认证码</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">统一认证码</label>
                   <input 
                     type="text" 
                     required
+                    maxLength={7}
                     value={newUser.authCode}
-                    onChange={(e) => setNewUser({ ...newUser, authCode: e.target.value })}
+                    onChange={(e) => setNewUser({ ...newUser, authCode: e.target.value.replace(/\D/g, '').slice(0, 7) })}
                     className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none" 
-                    placeholder="输入认证码"
+                    placeholder="输入7位数字统一认证码"
                   />
                 </div>
                 <div>
@@ -499,11 +585,12 @@ export default function UserManage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">认证码</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">统一认证码</label>
                   <input 
                     type="text" 
+                    maxLength={7}
                     value={selectedUser.authCode}
-                    onChange={(e) => setSelectedUser({ ...selectedUser, authCode: e.target.value })}
+                    onChange={(e) => setSelectedUser({ ...selectedUser, authCode: e.target.value.replace(/\D/g, '').slice(0, 7) })}
                     className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none" 
                   />
                 </div>
@@ -517,6 +604,16 @@ export default function UserManage() {
                     <option value="Active">正常 (Active)</option>
                     <option value="Banned">封禁 (Banned)</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">积分</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={selectedUser.points}
+                    onChange={(e) => setSelectedUser({ ...selectedUser, points: Math.max(0, Number(e.target.value) || 0) })}
+                    className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none"
+                  />
                 </div>
                 <div className="pt-4 flex gap-3">
                   <button type="button" onClick={() => setShowEditModal(false)} className="flex-1 py-2 text-gray-600 dark:text-slate-400 font-bold">取消</button>
@@ -544,21 +641,26 @@ export default function UserManage() {
                 <div className="w-16 h-16 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Lock className="w-8 h-8" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">重置用户密码</h3>
-                <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">正在为用户 <span className="font-bold text-primary-600">{selectedUser.username}</span> 重置登录密码</p>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">修改用户密码</h3>
+                <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">正在为用户 <span className="font-bold text-primary-600">{selectedUser.username}</span> 修改登录密码</p>
                 
                 <div className="mt-6 space-y-4">
                   <input 
                     type="password" 
-                    placeholder="输入新密码 (留空则默认为 123456)" 
+                    placeholder="请输入新密码" 
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     className="w-full px-4 py-2 bg-gray-50 dark:bg-slate-800 border-none rounded-xl focus:ring-2 focus:ring-primary-500 dark:text-white outline-none text-center"
                   />
+                  <p className="text-xs text-amber-600 dark:text-amber-300 text-left">{PASSWORD_POLICY_HINT}</p>
                   <div className="flex gap-3">
                     <button onClick={() => setShowResetModal(false)} className="flex-1 py-2 text-gray-600 dark:text-slate-400 font-bold">取消</button>
-                    <button onClick={handleResetPassword} disabled={isSubmitting} className="flex-1 py-2 bg-amber-600 text-white rounded-xl font-bold shadow-lg shadow-amber-500/20">
-                      {isSubmitting ? '处理中...' : '确认重置'}
+                    <button
+                      onClick={() => setConfirmAction({ kind: 'reset_password', username: selectedUser.username })}
+                      disabled={isSubmitting}
+                      className="flex-1 py-2 bg-amber-600 text-white rounded-xl font-bold shadow-lg shadow-amber-500/20"
+                    >
+                      {isSubmitting ? '处理中...' : '确认修改'}
                     </button>
                   </div>
                 </div>
@@ -567,6 +669,52 @@ export default function UserManage() {
           </div>
         )}
       </AnimatePresence>
+
+      <ConfirmModal
+        open={!!confirmAction}
+        title={
+          confirmAction?.kind === 'add_user'
+            ? '确认新增用户'
+            : confirmAction?.kind === 'update_user'
+              ? '确认保存用户修改'
+              : '确认修改密码'
+        }
+        description={
+          confirmAction?.kind === 'add_user'
+            ? '提交后将创建新的平台账号，并初始化默认密码。'
+            : confirmAction?.kind === 'update_user'
+              ? '提交后将覆盖当前用户信息。'
+              : '修改后用户将使用新密码登录，旧密码立即失效。'
+        }
+        highlightText={
+          confirmAction?.kind === 'add_user'
+            ? `${newUser.username} · ${newUser.role} · ${newUser.status}`
+            : confirmAction?.kind === 'update_user'
+              ? selectedUser
+                ? `${selectedUser.username} · ${selectedUser.status}`
+                : ''
+              : confirmAction?.kind === 'reset_password'
+                ? `${confirmAction.username} · 自定义新密码`
+                : ''
+        }
+        confirmText={isSubmitting ? '处理中...' : '确认执行'}
+        confirmDisabled={isSubmitting}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={async () => {
+          if (!confirmAction) return;
+          const action = confirmAction;
+          setConfirmAction(null);
+          if (action.kind === 'add_user') {
+            await submitAddUser();
+            return;
+          }
+          if (action.kind === 'update_user') {
+            await submitUpdateUser();
+            return;
+          }
+          await submitResetPassword();
+        }}
+      />
     </div>
   );
 }
