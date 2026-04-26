@@ -15,7 +15,7 @@ export function createVulnerabilitiesRouter({ prisma, requireAuth, requireRoles 
   const controller = createVulnerabilitiesController(service, prisma);
 
   router.get("/", controller.listVulnerabilities);
-  router.get("/:id/attachment", requireAuth, controller.getVulnerabilityAttachment);
+  router.get("/:id/attachment", controller.getVulnerabilityAttachment);
   router.post("/", requireAuth, controller.createVulnerability);
   router.patch("/:id", requireAuth, requireRoles("admin", "auditor"), controller.updateVulnerability);
 

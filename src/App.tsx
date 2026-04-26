@@ -8,6 +8,7 @@ import { User, UserRole } from './types';
 import Login from './views/Login';
 import Register from './views/Register';
 import Dashboard from './views/Dashboard';
+import Watermark from './components/Watermark';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -74,29 +75,37 @@ export default function App() {
   }, []);
 
   if (!user) {
-    return isRegistering ? (
-      <Register 
-        onSwitchToLogin={() => setIsRegistering(false)} 
-        isDarkMode={isDarkMode}
-        toggleTheme={() => setIsDarkMode(!isDarkMode)}
-      />
-    ) : (
-      <Login 
-        onLogin={handleLogin} 
-        onSwitchToRegister={() => setIsRegistering(true)}
-        isDarkMode={isDarkMode}
-        toggleTheme={() => setIsDarkMode(!isDarkMode)}
-      />
+    return (
+      <>
+        <Watermark user={null} />
+        {isRegistering ? (
+          <Register
+            onSwitchToLogin={() => setIsRegistering(false)}
+            isDarkMode={isDarkMode}
+            toggleTheme={() => setIsDarkMode(!isDarkMode)}
+          />
+        ) : (
+          <Login
+            onLogin={handleLogin}
+            onSwitchToRegister={() => setIsRegistering(true)}
+            isDarkMode={isDarkMode}
+            toggleTheme={() => setIsDarkMode(!isDarkMode)}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <Dashboard 
-      user={user} 
-      onLogout={handleLogout} 
-      onUpdateUser={handleUpdateUser}
-      isDarkMode={isDarkMode}
-      toggleTheme={() => setIsDarkMode(!isDarkMode)}
-    />
+    <>
+      <Watermark user={user} />
+      <Dashboard
+        user={user}
+        onLogout={handleLogout}
+        onUpdateUser={handleUpdateUser}
+        isDarkMode={isDarkMode}
+        toggleTheme={() => setIsDarkMode(!isDarkMode)}
+      />
+    </>
   );
 }

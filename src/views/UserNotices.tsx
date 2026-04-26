@@ -165,9 +165,10 @@ export default function UserNotices() {
                   </div>
                 </div>
 
-                <div className="text-gray-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap text-base">
-                  {selectedAnnouncement.content}
-                </div>
+                <div className="text-gray-600 dark:text-slate-300 leading-relaxed text-base"
+                  // 支持富文本格式的公告内容
+                  dangerouslySetInnerHTML={{ __html: selectedAnnouncement.content }}
+                />
               </div>
 
               <div className="p-6 bg-gray-50 dark:bg-slate-900/50 border-t border-gray-100 dark:border-slate-800">

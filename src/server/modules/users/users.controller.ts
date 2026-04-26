@@ -188,6 +188,8 @@ export function createUsersController(
       const username = typeof body.username === "string" ? body.username.trim() : undefined;
       const email = typeof body.email === "string" ? body.email.trim() : undefined;
       const avatar = typeof body.avatar === "string" ? body.avatar : undefined;
+      const role = typeof body.role === "string" ? body.role : undefined;
+      const emailCode = typeof body.emailCode === "string" ? body.emailCode.trim() : undefined;
 
       if (username !== undefined && (username.length < 2 || username.length > 50)) {
         return sendError(res, 400, "BAD_REQUEST", "用户名长度需在 2-50 之间");
@@ -197,12 +199,27 @@ export function createUsersController(
         if (!emailRegex.test(email) || email.length > 120) {
           return sendError(res, 400, "BAD_REQUEST", "邮箱格式不合法");
         }
+        // 如果邮箱发生变更，需要验证发往旧邮箱的验证码（确认身份）
+        if (email !== authUser.email) {
+          if (!emailCode) {
+            return sendError(res, 400, "BAD_REQUEST", "修改邮箱时需要填写发送到当前邮箱的验证码");
+          }
+          try {
+            await emailCodesService.verify(authUser.email, "change_email", emailCode, true);
+          } catch (error) {
+            const err = error as Error;
+            if (err.message === "CODE_NOT_FOUND") return sendError(res, 400, "BAD_REQUEST", "请先获取当前邮箱验证码");
+            if (err.message === "CODE_EXPIRED") return sendError(res, 400, "BAD_REQUEST", "邮箱验证码已过期，请重新获取");
+            if (err.message === "CODE_INVALID") return sendError(res, 400, "BAD_REQUEST", "邮箱验证码错误");
+            return sendError(res, 500, "INTERNAL_ERROR", "验证码校验失败");
+          }
+        }
       }
       if (avatar !== undefined && !validateAvatarDataUrl(avatar)) {
         return sendError(res, 400, "BAD_REQUEST", "头像格式仅支持 PNG/JPG，且大小不超过 2MB");
       }
 
-      const user = await service.updateSelfProfile(authUser.id, { username, email, avatar });
+      const user = await service.updateSelfProfile(authUser.id, { username, email, avatar, role });
       const meta = buildRequestLogMeta(req);
       await writeActivityLog(prisma, {
         actorId: authUser.id,
@@ -224,14 +241,13 @@ export function createUsersController(
       const authUser = getRequestAuthUser(req);
       if (!authUser) return sendError(res, 401, "UNAUTHORIZED", "未登录");
 
-      const { currentPassword, newPassword, confirmPassword, emailCode } = req.body as {
-        currentPassword?: string;
+      const { newPassword, confirmPassword, emailCode } = req.body as {
         newPassword?: string;
         confirmPassword?: string;
         emailCode?: string;
       };
 
-      if (!currentPassword || !newPassword || !confirmPassword || !emailCode) {
+      if (!newPassword || !confirmPassword || !emailCode) {
         return sendError(res, 400, "BAD_REQUEST", "请填写完整密码信息");
       }
       if (newPassword !== confirmPassword) {
@@ -239,9 +255,6 @@ export function createUsersController(
       }
       const passwordIssue = validatePasswordPolicy(newPassword);
       if (passwordIssue) return sendError(res, 400, "BAD_REQUEST", passwordIssue);
-      if (newPassword === currentPassword) {
-        return sendError(res, 400, "BAD_REQUEST", "新密码不能与旧密码相同");
-      }
 
       try {
         await emailCodesService.verify(authUser.email, "change_password", emailCode, true);
@@ -259,7 +272,7 @@ export function createUsersController(
         return sendError(res, 500, "INTERNAL_ERROR", "验证码校验失败");
       }
 
-      await service.changeSelfPassword(authUser.id, currentPassword, newPassword);
+      await service.changeSelfPassword(authUser.id, newPassword);
       const meta = buildRequestLogMeta(req);
       await writeActivityLog(prisma, {
         actorId: authUser.id,
@@ -273,9 +286,6 @@ export function createUsersController(
       return res.json({ success: true, message: "密码修改成功" });
     } catch (error) {
       const err = error as Error;
-      if (err.message === "INVALID_CURRENT_PASSWORD") {
-        return sendError(res, 400, "BAD_REQUEST", "当前密码错误");
-      }
       if (err.message === "NOT_FOUND") {
         return sendError(res, 404, "NOT_FOUND", "用户不存在");
       }
@@ -283,9 +293,34 @@ export function createUsersController(
     }
   };
 
+  const getUserById: express.RequestHandler = async (req, res) => {
+    try {
+      const authUser = getRequestAuthUser(req);
+      if (!authUser) return sendError(res, 401, "UNAUTHORIZED", "未登录");
+      const user = await service.getUserById(req.params.id);
+      return res.json({ success: true, user });
+    } catch {
+      return sendError(res, 404, "NOT_FOUND", "用户不存在");
+    }
+  };
+
+  const getMyPointLogs: express.RequestHandler = async (req, res) => {
+    try {
+      const authUser = getRequestAuthUser(req);
+      if (!authUser) return sendError(res, 401, "UNAUTHORIZED", "未登录");
+      const rawLimit = Number(req.query.limit);
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, Math.floor(rawLimit))) : 30;
+      const logs = await service.getMyPointLogs(authUser.id, limit);
+      return res.json({ success: true, logs });
+    } catch {
+      return sendError(res, 500, "INTERNAL_ERROR", "获取积分记录失败");
+    }
+  };
+
   return {
     listLeaderboard,
     listUsers,
+    getUserById,
     createUser,
     updateUser,
     deleteUser,
@@ -293,5 +328,6 @@ export function createUsersController(
     signAgreement,
     updateSelfProfile,
     updateSelfPassword,
+    getMyPointLogs,
   };
 }

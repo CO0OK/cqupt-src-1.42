@@ -4,6 +4,7 @@ import { User } from '../types';
 import SliderCaptcha from '../components/SliderCaptcha';
 import { getApiErrorMessage } from '../utils/apiError';
 import { PASSWORD_POLICY_HINT, validatePasswordPolicyText } from '../utils/passwordPolicy';
+import PasswordStrengthBar from '../components/PasswordStrengthBar';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -325,7 +326,8 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
                 onChange={(e) => setForgotForm((prev) => ({ ...prev, newPassword: e.target.value }))}
                 className="w-full px-3 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
               />
-              <p className="text-xs text-gray-500 dark:text-slate-400 ml-0.5">{PASSWORD_POLICY_HINT}</p>
+              <PasswordStrengthBar password={forgotForm.newPassword} />
+              {!forgotForm.newPassword && <p className="text-xs text-gray-500 dark:text-slate-400 ml-0.5">{PASSWORD_POLICY_HINT}</p>}
             </div>
 
             <div className="space-y-1.5">

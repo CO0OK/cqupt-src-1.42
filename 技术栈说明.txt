@@ -1,0 +1,6 @@
+语言：Go 1.22+
+Web框架：Gin
+ORM：GORM
+数据库：MySQL + Redis
+API文档：Swagger
+部署：Docker + 简单 K8s 概念

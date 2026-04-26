@@ -19,6 +19,7 @@ export function createUsersRouter(options: {
   const controller = createUsersController(service, options.emailCodesService, options.prisma);
 
   router.get("/leaderboard", options.requireAuth, controller.listLeaderboard);
+  router.get("/me/point-logs", options.requireAuth, controller.getMyPointLogs);
   router.patch("/me/profile", options.requireAuth, controller.updateSelfProfile);
   router.patch("/me/password", options.requireAuth, controller.updateSelfPassword);
   router.patch("/profile", options.requireAuth, controller.updateSelfProfile);
@@ -26,6 +27,7 @@ export function createUsersRouter(options: {
 
   router.get("/", options.requireAuth, options.requireRoles("admin"), controller.listUsers);
   router.post("/", options.requireAuth, options.requireRoles("admin"), controller.createUser);
+  router.get("/:id", options.requireAuth, controller.getUserById);
   router.patch("/:id", options.requireAuth, options.requireRoles("admin"), controller.updateUser);
   router.delete("/:id", options.requireAuth, options.requireRoles("admin"), controller.deleteUser);
   router.post("/:id/reset-password", options.requireAuth, options.requireRoles("admin"), controller.resetPassword);

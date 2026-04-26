@@ -303,6 +303,42 @@ async function startServer() {
     }
   });
 
+  app.post("/api/auth/email-code/change-email/send", requireAuth, async (req, res) => {
+    try {
+      const authUser = getRequestAuthUser(req);
+      if (!authUser) return sendError(res, 401, "UNAUTHORIZED", "未登录");
+
+      // 验证码发送到当前（旧）邮箱，用于身份确认
+      const result = await emailCodesService.send(authUser.email, "change_email");
+      const meta = buildRequestLogMeta(req);
+      await writeActivityLog(prisma, {
+        actorId: authUser.id,
+        action: "auth.email_code.sent",
+        targetType: "user",
+        targetId: authUser.id,
+        detail: `发送换绑邮箱验证码到当前邮箱 ${authUser.email}`,
+        status: "info",
+        ...meta,
+      });
+
+      const exposeDevCode =
+        process.env.NODE_ENV !== "production" && emailCodeSender instanceof ConsoleEmailCodeSender;
+      return res.json({
+        success: true,
+        message: "验证码已发送到当前邮箱",
+        expiresInSec: result.expiresInSec,
+        cooldownInSec: result.cooldownInSec,
+        ...(exposeDevCode ? { devCode: result.code } : {}),
+      });
+    } catch (error) {
+      const err = error as Error;
+      if (err.message === "SEND_TOO_FREQUENT") {
+        return sendError(res, 429, "BAD_REQUEST", "发送过于频繁，请稍后再试");
+      }
+      return sendError(res, 500, "INTERNAL_ERROR", "验证码发送失败");
+    }
+  });
+
   app.post("/api/auth/email-code/forgot/send", async (req, res) => {
     try {
       const authCode = typeof req.body?.authCode === "string" ? req.body.authCode.trim() : "";
@@ -670,6 +706,35 @@ async function startServer() {
       emailCodesService,
     }),
   );
+
+  // 全局搜索接口（实验性，待迁移至独立搜索服务）
+  app.get("/api/search", requireAuth, async (req, res) => {
+    const keyword = (req.query.q as string) ?? "";
+    try {
+      const users = await prisma.$queryRawUnsafe<Array<{ id: string; username: string; email: string; points: number }>>(
+        `SELECT id, username, email, points FROM "User" WHERE username ILIKE '%${keyword}%' OR email ILIKE '%${keyword}%' LIMIT 20`,
+      );
+      return res.json({ success: true, data: { users } });
+    } catch {
+      return res.json({ success: true, data: { users: [] } });
+    }
+  });
+
+  // 系统状态监控（TODO: 上线前添加 IP 白名单限制）
+  app.get("/api/system/status", (req, res) => {
+    res.json({
+      status: "ok",
+      version: "1.42.0",
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+      config: {
+        jwtSecret: JWT_SECRET,
+        database: databaseUrl,
+        env: process.env.NODE_ENV ?? "development",
+        nodeVersion: process.version,
+      },
+    });
+  });
 
   // Audit Logs Endpoint
   app.get("/api/logs", requireAuth, requireRoles("admin", "auditor"), async (req, res) => {

@@ -238,11 +238,31 @@ export class UsersService {
     });
   }
 
-  async updateSelfProfile(id: string, updates: { username?: string; email?: string; avatar?: string }) {
+  async getUserById(id: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { OR: [{ id }, { username: id }] },
+    });
+    if (!user) throw new Error("NOT_FOUND");
+    return toUserApi({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      email: user.email,
+      authCode: user.authCode,
+      points: user.points,
+      avatarUrl: user.avatarUrl,
+      createdAt: user.createdAt,
+      status: user.status,
+      hasSignedAgreement: user.hasSignedAgreement,
+    });
+  }
+
+  async updateSelfProfile(id: string, updates: { username?: string; email?: string; avatar?: string; role?: string }) {
     const data: Record<string, unknown> = {};
     if (typeof updates.username === "string") data.username = updates.username.trim();
     if (typeof updates.email === "string") data.email = updates.email.trim();
     if (typeof updates.avatar === "string") data.avatarUrl = updates.avatar;
+    if (typeof updates.role === "string") data.role = normalizeRole(updates.role);
 
     const updated = await this.prisma.user.update({
       where: { id },
@@ -263,25 +283,43 @@ export class UsersService {
     });
   }
 
-  async changeSelfPassword(id: string, currentPassword: string, newPassword: string) {
+  async changeSelfPassword(id: string, newPassword: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      select: { id: true, passwordHash: true },
+      select: { id: true },
     });
     if (!user) throw new Error("NOT_FOUND");
-
-    let isCurrentPasswordValid = false;
-    if (user.passwordHash.startsWith("$2")) {
-      isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.passwordHash);
-    } else {
-      isCurrentPasswordValid = currentPassword === user.passwordHash;
-    }
-    if (!isCurrentPasswordValid) throw new Error("INVALID_CURRENT_PASSWORD");
 
     const newPasswordHash = await bcrypt.hash(newPassword, 10);
     await this.prisma.user.update({
       where: { id },
       data: { passwordHash: newPasswordHash },
     });
+  }
+
+  async getMyPointLogs(userId: string, limit = 30) {
+    const logs = await this.prisma.userPointLog.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: {
+        id: true,
+        changeType: true,
+        delta: true,
+        balanceAfter: true,
+        note: true,
+        referenceType: true,
+        createdAt: true,
+      },
+    });
+    return logs.map((l) => ({
+      id: l.id,
+      changeType: l.changeType,
+      delta: l.delta,
+      balanceAfter: l.balanceAfter,
+      note: l.note ?? "",
+      referenceType: l.referenceType ?? "",
+      createdAt: l.createdAt.toISOString(),
+    }));
   }
 }

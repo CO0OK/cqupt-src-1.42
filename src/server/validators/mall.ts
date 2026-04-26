@@ -171,8 +171,10 @@ export function validateCreateRedemptionPayload(body: unknown): ValidationResult
     const parsed = parseSafeInt(input.quantity);
     if (parsed === null) {
       issues.push({ field: "quantity", reason: "must be integer" });
-    } else if (parsed < 1 || parsed > 999) {
-      issues.push({ field: "quantity", reason: "must be between 1 and 999" });
+    } else if (parsed === 0) {
+      issues.push({ field: "quantity", reason: "quantity cannot be zero" });
+    } else if (Math.abs(parsed) > 999) {
+      issues.push({ field: "quantity", reason: "quantity must be at most 999" });
     } else {
       quantity = parsed;
     }

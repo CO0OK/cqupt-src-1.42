@@ -17,6 +17,28 @@ const COMMON_PASSWORDS = new Set([
 
 export const PASSWORD_POLICY_HINT = '密码需 8-64 位，且至少包含字母/数字/符号中的两种，不可使用常见弱口令。';
 
+export type PasswordStrengthLevel = 'empty' | 'weak' | 'medium' | 'strong' | 'very-strong';
+
+export interface PasswordStrength {
+  level: PasswordStrengthLevel;
+  label: string;
+  score: number; // 0-4
+}
+
+export function getPasswordStrength(password: string): PasswordStrength {
+  if (!password) return { level: 'empty', label: '', score: 0 };
+  const hasLetter = /[A-Za-z]/.test(password);
+  const hasDigit = /\d/.test(password);
+  const hasSymbol = /[^A-Za-z0-9]/.test(password);
+  const categories = Number(hasLetter) + Number(hasDigit) + Number(hasSymbol);
+  const len = password.length;
+
+  if (len < 8 || categories < 2) return { level: 'weak', label: '弱', score: 1 };
+  if (categories === 3 && len >= 16) return { level: 'very-strong', label: '非常强', score: 4 };
+  if ((categories === 3 && len >= 12) || (categories === 2 && len >= 16)) return { level: 'strong', label: '强', score: 3 };
+  return { level: 'medium', label: '中等', score: 2 };
+}
+
 export function validatePasswordPolicyText(password: string): string | null {
   const value = password.trim();
   if (!value) return '密码不能为空';

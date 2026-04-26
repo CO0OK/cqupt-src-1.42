@@ -4,6 +4,7 @@ import SliderCaptcha from '../components/SliderCaptcha';
 import { motion, AnimatePresence } from 'motion/react';
 import { getApiErrorMessage } from '../utils/apiError';
 import { PASSWORD_POLICY_HINT, validatePasswordPolicyText } from '../utils/passwordPolicy';
+import PasswordStrengthBar from '../components/PasswordStrengthBar';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;
@@ -253,7 +254,8 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
-            <p className="text-xs text-gray-500 dark:text-slate-400 ml-1">{PASSWORD_POLICY_HINT}</p>
+            <PasswordStrengthBar password={formData.password} />
+            {!formData.password && <p className="text-xs text-gray-500 dark:text-slate-400 ml-1">{PASSWORD_POLICY_HINT}</p>}
           </div>
 
           <div className="flex items-center gap-2 px-1">

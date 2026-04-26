@@ -58,3 +58,13 @@
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+.wm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  user-select: none;
+  background-repeat: repeat;
+  background-size: 240px 140px;
+}

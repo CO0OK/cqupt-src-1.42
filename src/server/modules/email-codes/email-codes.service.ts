@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import { createClient } from "redis";
 
-export type EmailCodeScene = "register" | "change_password" | "forgot_password";
+export type EmailCodeScene = "register" | "change_password" | "forgot_password" | "change_email";
 
 export type EmailCodeRecord = {
   code: string;
@@ -90,7 +90,7 @@ export class RedisEmailCodeStore implements EmailCodeStore {
 
 export class ConsoleEmailCodeSender implements EmailCodeSender {
   async sendCode(input: { email: string; code: string; scene: EmailCodeScene; expiresInSec: number }): Promise<void> {
-    const sceneLabel = input.scene === "register" ? "注册" : input.scene === "change_password" ? "修改密码" : "找回密码";
+    const sceneLabel = input.scene === "register" ? "注册" : input.scene === "change_password" ? "修改密码" : input.scene === "change_email" ? "修改邮箱" : "找回密码";
     console.log(
       `[EmailCode][DEV] ${sceneLabel} 验证码 -> email=${input.email}, code=${input.code}, expiresInSec=${input.expiresInSec}`,
     );
@@ -121,7 +121,7 @@ export class SmtpEmailCodeSender implements EmailCodeSender {
   private readonly from: string;
 
   async sendCode(input: { email: string; code: string; scene: EmailCodeScene; expiresInSec: number }): Promise<void> {
-    const sceneLabel = input.scene === "register" ? "注册" : input.scene === "change_password" ? "修改密码" : "找回密码";
+    const sceneLabel = input.scene === "register" ? "注册" : input.scene === "change_password" ? "修改密码" : input.scene === "change_email" ? "修改邮箱" : "找回密码";
     const subject = `CQUPT-SRC ${sceneLabel}验证码`;
     const text = [
       `你正在进行 ${sceneLabel} 操作。`,
