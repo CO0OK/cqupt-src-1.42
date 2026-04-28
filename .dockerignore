@@ -53,9 +53,6 @@ docs
 .editorconfig
 .prettierrc
 .eslintrc*
-tsconfig.json
-vite.config.ts
 
 # Database
 *.sql
-migrations (if not needed in production)

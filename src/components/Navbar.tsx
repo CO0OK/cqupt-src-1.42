@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { User, NavItem } from '../types';
 import { NAV_ITEMS } from '../constants';
+import logoImg from '../CQUPT/CQUPT_01_logo_8.png';
 
 interface NavbarProps {
   user: User;
@@ -53,7 +54,7 @@ export default function Navbar({ user, activeTab, setActiveTab, onLogout, isDark
     <header className="sticky top-0 z-40 w-full border-b border-gray-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex shrink-0 items-center gap-2 cursor-pointer" onClick={() => setActiveTab('home')}>
-          <img src="src\CQUPT\CQUPT_01_logo_8.png" alt="Logo" className="w-45 h-12" />
+          <img src={logoImg} alt="Logo" className="w-45 h-12" />
         </div>
 
         <nav

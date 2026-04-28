@@ -50,10 +50,32 @@ const prisma = new PrismaClient({ adapter });
 const JWT_SECRET = process.env.JWT_SECRET || "dev-only-please-change-jwt-secret";
 const AUTH_COOKIE_NAME = "cqupt_src_token";
 const AUTH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const AUTH_COOKIE_SECURE_OVERRIDE = process.env.AUTH_COOKIE_SECURE?.trim().toLowerCase();
 const CERT_CODE_PREFIX = "CQUPT-";
 const CERT_CODE_SUFFIX_LENGTH = 12;
 const CERT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CERT_CODE_MAX_ATTEMPTS = 12;
+
+function shouldUseSecureAuthCookie(req: express.Request): boolean {
+  if (AUTH_COOKIE_SECURE_OVERRIDE === "true" || AUTH_COOKIE_SECURE_OVERRIDE === "1") {
+    return true;
+  }
+  if (AUTH_COOKIE_SECURE_OVERRIDE === "false" || AUTH_COOKIE_SECURE_OVERRIDE === "0") {
+    return false;
+  }
+
+  if (req.secure) return true;
+
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  if (typeof forwardedProto === "string") {
+    return forwardedProto.split(",")[0].trim() === "https";
+  }
+  if (Array.isArray(forwardedProto)) {
+    return forwardedProto[0]?.split(",")[0].trim() === "https";
+  }
+
+  return false;
+}
 
 function toDateString(date: Date): string {
   return date.toISOString().split("T")[0];
@@ -198,6 +220,7 @@ function vulnerabilityAuditActionToStatus(
 
 async function startServer() {
   const app = express();
+  app.set("trust proxy", true);
   const rawPort = Number(process.env.PORT ?? "3000");
   const PORT = Number.isFinite(rawPort) && rawPort > 0 ? Math.floor(rawPort) : 3000;
   const hmrPortRaw = Number(process.env.VITE_HMR_PORT ?? "24679");
@@ -524,10 +547,12 @@ async function startServer() {
         { expiresIn: "7d" },
       );
 
+      const secureAuthCookie = shouldUseSecureAuthCookie(req);
+
       res.cookie(AUTH_COOKIE_NAME, token, {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure: secureAuthCookie,
         maxAge: AUTH_COOKIE_MAX_AGE_MS,
         path: "/",
       });
@@ -616,10 +641,12 @@ async function startServer() {
         JWT_SECRET,
         { expiresIn: "7d" },
       );
+      const secureAuthCookie = shouldUseSecureAuthCookie(req);
+
       res.cookie(AUTH_COOKIE_NAME, token, {
         httpOnly: true,
         sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
+        secure: secureAuthCookie,
         maxAge: AUTH_COOKIE_MAX_AGE_MS,
         path: "/",
       });
@@ -659,10 +686,11 @@ async function startServer() {
 
   app.post("/api/logout", async (req, res) => {
     const authUser = getRequestAuthUser(req);
+    const secureAuthCookie = shouldUseSecureAuthCookie(req);
     res.clearCookie(AUTH_COOKIE_NAME, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: secureAuthCookie,
       path: "/",
     });
 

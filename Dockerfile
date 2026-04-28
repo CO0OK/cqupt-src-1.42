@@ -6,21 +6,23 @@ WORKDIR /app
 # 复制 package 文件
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
 # 安装依赖
-RUN npm ci --omit=dev
+RUN npm ci
 
 # 生成 Prisma Client
-RUN npm run db:generate
+RUN DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy npm run db:generate
 
 # 复制源代码
 COPY src ./src
 COPY public ./public
-COPY vite.config.ts tsconfig.json server.ts ./
+COPY vite.config.ts tsconfig.json server.ts index.html ./
 COPY eslint.config.js ./
 
 # 构建前端
-RUN npm run build
+RUN npm run build && \
+    npx esbuild server.ts --bundle --platform=node --outfile=dist/server.js --format=esm --packages=external
 
 # Stage 2 - 运行时镜像
 FROM node:22-alpine
@@ -33,6 +35,7 @@ RUN apk add --no-cache dumb-init
 # 复制 package 文件和 prisma schema
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
 # 仅安装生产依赖
 RUN npm ci --omit=dev && \

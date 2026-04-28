@@ -5,6 +5,7 @@ import SliderCaptcha from '../components/SliderCaptcha';
 import { getApiErrorMessage } from '../utils/apiError';
 import { PASSWORD_POLICY_HINT, validatePasswordPolicyText } from '../utils/passwordPolicy';
 import PasswordStrengthBar from '../components/PasswordStrengthBar';
+import logoImg from '../CQUPT/CQUPT_01_logo_1024px.png';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -160,7 +161,7 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
       <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl p-8 animate-fade-in">
         <div className="flex flex-col items-center mb-8">
           <div >
-            <img src="src\CQUPT\CQUPT_01_logo_1024px.png" alt="Logo" className="w-25 h-25" />
+            <img src={logoImg} alt="Logo" className="w-25 h-25" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">CQUPT-SRC</h1>
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">安全响应中心门户</p>

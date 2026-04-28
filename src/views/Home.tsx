@@ -6,6 +6,7 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
   const [activeWhitehatCount, setActiveWhitehatCount] = useState<number | null>(null);
   const [totalVulnCount, setTotalVulnCount] = useState<number | null>(null);
   const [fixedVulnCount, setFixedVulnCount] = useState<number | null>(null);
+  const [pendingVulnCount, setPendingVulnCount] = useState<number | null>(null);
   const [vulnRows, setVulnRows] = useState<Array<{
     id: string;
     author: string;
@@ -21,9 +22,23 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
         const vulnRes = await fetch('/api/vulnerabilities');
         const vulnData = await vulnRes.json();
         if (vulnRes.ok && Array.isArray(vulnData)) {
-          setTotalVulnCount(vulnData.length);
-          setFixedVulnCount(vulnData.filter((v: { status?: string }) => v.status === '已修复').length);
-          setVulnRows(vulnData);
+          const scopedVulns = user.role === 'user'
+            ? vulnData.filter((v: { author?: string }) => v.author === user.username)
+            : vulnData;
+
+          setTotalVulnCount(scopedVulns.length);
+          setFixedVulnCount(scopedVulns.filter((v: { status?: string }) => v.status === '已修复').length);
+          setPendingVulnCount(
+            scopedVulns.filter((v: { status?: string }) => v.status === '待处理' || v.status === '审核中').length,
+          );
+          setVulnRows(scopedVulns);
+
+          if (user.role === 'user') {
+            setActiveWhitehatCount(
+              scopedVulns.filter((v: { status?: string }) => v.status === '待处理' || v.status === '审核中').length,
+            );
+            return;
+          }
         }
 
         if (user.role === 'admin') {
@@ -38,6 +53,7 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
         const res = await fetch('/api/users/leaderboard?limit=100');
         const data = await res.json();
         if (!res.ok || !Array.isArray(data?.leaderboard)) return;
+
         setActiveWhitehatCount(data.leaderboard.length);
       } catch (error) {
         console.error('Failed to fetch active whitehat stats:', error);
@@ -45,12 +61,10 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
     };
 
     fetchHomeStats();
-  }, [user.role]);
+  }, [user.role, user.username]);
 
   const radarMetrics = useMemo(() => {
-    const rows = (user.role === 'user'
-      ? vulnRows.filter((v) => v.author === user.username)
-      : vulnRows) as Array<{
+    const rows = vulnRows as Array<{
       author: string;
       type: string;
       level: string;
@@ -147,12 +161,12 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
           onClick={() => setActiveTab('mall')}
         />
         <StatCard 
-          title="活跃白帽" 
+          title={user.role === 'user' ? '待处理数' : '活跃白帽'} 
           value={activeWhitehatCount === null ? '...' : activeWhitehatCount.toLocaleString()} 
           icon={Users} 
           color="text-primary-600" 
           bg="bg-primary-50 dark:bg-primary-900/20" 
-          onClick={() => setActiveTab('leaderboard')}
+          onClick={() => setActiveTab(user.role === 'user' ? 'my_vulns' : 'leaderboard')}
         />
       </div>
 
@@ -161,10 +175,44 @@ export default function Home({ user, setActiveTab }: { user: User, setActiveTab:
         <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-sm">
           <h3 className="font-bold text-lg mb-6 text-gray-900 dark:text-white">漏洞等级分布</h3>
           <div className="space-y-6">
-            <ProgressBar label="高危漏洞 (Critical)" percent={15} color="bg-red-500" />
-            <ProgressBar label="中危漏洞 (Medium)" percent={45} color="bg-orange-500" />
-            <ProgressBar label="低危漏洞 (Low)" percent={30} color="bg-primary-500" />
-            <ProgressBar label="信息泄露 (Info)" percent={10} color="bg-gray-400" />
+            <ProgressBar
+              label="高危漏洞 (Critical)"
+              percent={
+                totalVulnCount && totalVulnCount > 0
+                  ? Math.round(
+                      (vulnRows.filter((v) => v.level === '严重' || v.level === '高危').length / totalVulnCount) * 100,
+                    )
+                  : 0
+              }
+              color="bg-red-500"
+            />
+            <ProgressBar
+              label="中危漏洞 (Medium)"
+              percent={
+                totalVulnCount && totalVulnCount > 0
+                  ? Math.round((vulnRows.filter((v) => v.level === '中危').length / totalVulnCount) * 100)
+                  : 0
+              }
+              color="bg-orange-500"
+            />
+            <ProgressBar
+              label="低危漏洞 (Low)"
+              percent={
+                totalVulnCount && totalVulnCount > 0
+                  ? Math.round((vulnRows.filter((v) => v.level === '低危').length / totalVulnCount) * 100)
+                  : 0
+              }
+              color="bg-primary-500"
+            />
+            <ProgressBar
+              label="信息泄露 (Info)"
+              percent={
+                totalVulnCount && totalVulnCount > 0
+                  ? Math.round((vulnRows.filter((v) => v.level === '信息').length / totalVulnCount) * 100)
+                  : 0
+              }
+              color="bg-gray-400"
+            />
           </div>
         </div>
 
