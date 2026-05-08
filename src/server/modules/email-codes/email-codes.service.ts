@@ -160,8 +160,8 @@ export class EmailCodesService {
     this.store = options?.store ?? new MemoryEmailCodeStore();
     this.sender = options?.sender ?? new ConsoleEmailCodeSender();
     this.ttlMs = options?.ttlMs ?? 5 * 60 * 1000;
-    this.resendIntervalMs = options?.resendIntervalMs ?? 60 * 1000;
-    this.maxFailedAttempts = options?.maxFailedAttempts ?? 5;
+    this.resendIntervalMs = options?.resendIntervalMs ?? 5 * 60 * 1000;
+    this.maxFailedAttempts = options?.maxFailedAttempts ?? 3;
   }
 
   async send(email: string, scene: EmailCodeScene): Promise<EmailCodeSendResult> {

@@ -112,17 +112,26 @@ function getCertificateFontPath(): string | null {
 }
 
 function formatDateTime(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const mm = String(date.getMinutes()).padStart(2, "0");
-  const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+  return date.toLocaleString("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).replace(/\//g, "-");
 }
 
 function parseDateQueryParam(value: unknown): Date | null {
   if (typeof value !== "string" || !value.trim()) return null;
+  // 将 YYYY-MM-DD 解析为北京时间当天 00:00（UTC+8）
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const [, y, m, d] = match;
+    return new Date(`${y}-${m}-${d}T00:00:00+08:00`);
+  }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;

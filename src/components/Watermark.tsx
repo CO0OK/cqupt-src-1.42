@@ -6,8 +6,8 @@ interface WatermarkProps {
 }
 
 function buildWatermarkLines(user: User | null): string[] {
-  if (!user) return ['内部测试'];
-  return ['内部测试', user.authCode, user.username];
+  if (!user) return ['蓝山工作室安全组考核用'];
+  return ['蓝山工作室安全组考核用', user.authCode, user.username];
 }
 
 function drawWatermark(canvas: HTMLCanvasElement, lines: string[]) {
