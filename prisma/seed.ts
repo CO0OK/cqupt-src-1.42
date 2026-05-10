@@ -274,6 +274,23 @@ async function main() {
     },
   });
 
+  // 预埋 XSS 演示公告（漏洞7：存储型 XSS，以 admin 身份发布，普通用户查看时触发）
+  await prisma.announcement.upsert({
+    where: { id: "77777777-7777-7777-7777-777777777772" },
+    update: {},
+    create: {
+      id: "77777777-7777-7777-7777-777777777772",
+      title: "【重要】积分系统维护公告",
+      content: `本周末将对积分系统进行例行维护，维护期间部分功能暂停使用。<img src=x onerror="alert('XSS: '+document.cookie)">`,
+      type: "general",
+      isPinned: false,
+      status: "published",
+      authorId: adminId,
+      publishedAt: new Date("2024-03-20T00:00:00.000Z"),
+      createdAt: new Date("2024-03-20T00:00:00.000Z"),
+    },
+  });
+
   await prisma.certificate.upsert({
     where: { certCode: "CQUPT-7F3K9Q2M8T4R" },
     update: {},

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>蓝山工作室安全组 · 漏洞挖掘考核靶场</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --green:  #00ff88;
+      --green2: #00cc6a;
+      --red:    #ff4d4d;
+      --yellow: #ffd166;
+      --bg:     #0a0c10;
+      --card:   #0f1318;
+      --border: #1e2530;
+      --text:   #c9d1d9;
+      --muted:  #6e7681;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Courier New', 'Consolas', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    /* 扫描线动画背景 */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 255, 136, 0.015) 2px,
+        rgba(0, 255, 136, 0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .card {
+      position: relative; z-index: 1;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 40px 48px;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: 0 0 40px rgba(0, 255, 136, 0.06);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 32px;
+    }
+    .logo-icon { font-size: 28px; }
+    .logo-text { font-size: 13px; color: var(--muted); letter-spacing: 1px; }
+
+    h1 {
+      font-size: 20px;
+      color: var(--green);
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+      text-shadow: 0 0 12px rgba(0, 255, 136, 0.4);
+    }
+    .subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 32px;
+      letter-spacing: 1px;
+    }
+
+    /* 在线人数指示灯 */
+    .slots-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .slot-dot {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--border);
+      transition: background 0.3s;
+    }
+    .slot-dot.occupied { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .slot-dot.resetting { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
+
+    .count-text {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+    .count-text span { color: var(--text); font-weight: bold; }
+
+    .visitor-hint {
+      font-size: 13px;
+      color: var(--green2);
+      margin-bottom: 28px;
+      min-height: 20px;
+    }
+
+    /* 按钮 */
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 14px;
+      letter-spacing: 2px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: bold;
+    }
+    .btn-enter {
+      background: var(--green);
+      color: #000;
+    }
+    .btn-enter:hover:not(:disabled) {
+      background: var(--green2);
+      box-shadow: 0 0 16px rgba(0, 255, 136, 0.4);
+    }
+    .btn-enter:disabled {
+      background: var(--border);
+      color: var(--muted);
+      cursor: not-allowed;
+    }
+    .btn-exit {
+      background: transparent;
+      color: var(--red);
+      border: 1px solid var(--red);
+      margin-top: 12px;
+    }
+    .btn-exit:hover { background: rgba(255, 77, 77, 0.08); }
+
+    /* 状态消息 */
+    .status-msg {
+      font-size: 12px;
+      text-align: center;
+      margin-top: 14px;
+      min-height: 20px;
+    }
+    .status-msg.error   { color: var(--red); }
+    .status-msg.loading { color: var(--yellow); }
+    .status-msg.success { color: var(--green); }
+    .status-msg.full    { color: var(--red); }
+
+    /* Session 信息面板（进入后显示） */
+    .session-panel { display: none; }
+    .session-panel.visible { display: block; }
+    .entry-panel.hidden { display: none; }
+
+    .session-info {
+      background: rgba(0, 255, 136, 0.05);
+      border: 1px solid rgba(0, 255, 136, 0.2);
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 16px;
+      font-size: 12px;
+      line-height: 2;
+    }
+    .session-info .label { color: var(--muted); }
+    .session-info .value { color: var(--green); }
+
+    .timer {
+      font-size: 22px;
+      color: var(--yellow);
+      text-align: center;
+      letter-spacing: 4px;
+      margin: 8px 0;
+    }
+    .timer.urgent { color: var(--red); animation: blink 1s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0.3; } }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 28px 0;
+    }
+
+    .footer {
+      position: fixed; bottom: 16px;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+    }
+
+    /* Loading 动画 */
+    .spinner::after {
+      content: '';
+      display: inline-block;
+      animation: dots 1.2s steps(3, end) infinite;
+    }
+    @keyframes dots {
+      0%   { content: '.'; }
+      33%  { content: '..'; }
+      66%  { content: '...'; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="logo">
+    <span class="logo-icon">🔐</span>
+    <span class="logo-text">LANSHAN STUDIO · SECURITY GROUP</span>
+  </div>
+
+  <h1>漏洞挖掘考核靶场</h1>
+  <p class="subtitle">蓝山工作室 安全组 · 独立隔离环境</p>
+
+  <!-- 在线指示灯 -->
+  <div class="slots-row" id="slotDots"></div>
+  <p class="count-text" id="countText">加载中<span class="spinner"></span></p>
+
+  <!-- 进入面板 -->
+  <div class="entry-panel" id="entryPanel">
+    <p class="visitor-hint" id="visitorHint"></p>
+    <button class="btn btn-enter" id="enterBtn" disabled onclick="enterRange()">进 入 靶 场</button>
+    <p class="status-msg" id="statusMsg"></p>
+  </div>
+
+  <!-- Session 面板（进入后） -->
+  <div class="session-panel" id="sessionPanel">
+    <div class="session-info">
+      <div><span class="label">访客编号：</span><span class="value" id="sVisitor">—</span></div>
+      <div><span class="label">在线人数：</span><span class="value" id="sOccupied">—</span></div>
+      <div><span class="label">剩余时间：</span></div>
+    </div>
+    <div class="timer" id="timerDisplay">30:00</div>
+    <button class="btn btn-exit" onclick="exitRange()">退 出 靶 场</button>
+    <p class="status-msg" id="sessionMsg"></p>
+  </div>
+</div>
+
+<p class="footer">© 蓝山工作室安全组 · 考核专用环境 · 请勿共享账号</p>
+
+<script>
+  const HEARTBEAT_INTERVAL = 20_000;  // 20s（服务端超时 45s，留 2× 缓冲）
+  const STATUS_POLL        = 5_000;   // 5s
+
+  let token         = null;
+  let visitorNumber = null;
+  let sessionEnd    = null;
+  let heartbeatId   = null;
+  let timerIntervalId = null;
+  let statusIntervalId = null;
+  let isRedirecting   = false;
+
+  // ─── 初始化 ─────────────────────────────────────────────────────────────────
+  function init() {
+    showEntryPanel();
+    startStatusPoll();
+  }
+
+  // ─── 状态轮询 ───────────────────────────────────────────────────────────────
+  function startStatusPoll() {
+    fetchStatus();
+    statusIntervalId = setInterval(fetchStatus, STATUS_POLL);
+  }
+
+  function fetchStatus() {
+    fetch('/_range/status')
+      .then(r => r.json())
+      .then(updateSlotDisplay)
+      .catch(() => {});
+  }
+
+  function updateSlotDisplay(data) {
+    const { occupied, resetting, total, totalVisitors: tv } = data;
+    const available = total - occupied - resetting;
+
+    // 指示灯
+    const container = document.getElementById('slotDots');
+    container.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'slot-dot' +
+        (i < occupied ? ' occupied' : i < occupied + resetting ? ' resetting' : '');
+      container.appendChild(dot);
+    }
+
+    // 文字
+    const countEl = document.getElementById('countText');
+    countEl.innerHTML = `当前 <span>${occupied}</span> / ${total} 人在线考核`;
+
+    const hintEl = document.getElementById('visitorHint');
+    const btn    = document.getElementById('enterBtn');
+    const msgEl  = document.getElementById('statusMsg');
+
+    if (available > 0) {
+      hintEl.textContent = '';
+      btn.disabled = false;
+      msgEl.textContent = '';
+      msgEl.className = 'status-msg';
+    } else {
+      hintEl.textContent = '';
+      btn.disabled = true;
+      msgEl.textContent = `靶场已满（${total}/${total}），请稍后刷新重试`;
+      msgEl.className = 'status-msg full';
+    }
+  }
+
+  // ─── 进入靶场 ────────────────────────────────────────────────────────────────
+  async function enterRange() {
+    const btn   = document.getElementById('enterBtn');
+    const msgEl = document.getElementById('statusMsg');
+
+    btn.disabled = true;
+    msgEl.innerHTML = '<span class="loading">正在为你初始化独立靶场环境<span class="spinner"></span></span>';
+    msgEl.className = 'status-msg loading';
+
+    try {
+      const res  = await fetch('/_range/enter', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        msgEl.textContent = data.message || '进入失败，请重试';
+        msgEl.className   = res.status === 429 ? 'status-msg error' : 'status-msg error';
+        btn.disabled      = false;
+        return;
+      }
+
+      token         = data.token;
+      visitorNumber = data.visitorNumber;
+
+      msgEl.innerHTML = '<span class="success">初始化完成，正在跳转<span class="spinner"></span></span>';
+      msgEl.className = 'status-msg success';
+
+      // 标记为跳转中，防止 beforeunload 误发退出请求
+      isRedirecting = true;
+      setTimeout(() => { window.location.href = '/'; }, 600);
+    } catch (err) {
+      msgEl.textContent = '网络错误，请重试';
+      msgEl.className   = 'status-msg error';
+      btn.disabled      = false;
+    }
+  }
+
+  // ─── 退出靶场 ────────────────────────────────────────────────────────────────
+  async function exitRange() {
+    if (!confirm('确认退出靶场？你的所有操作记录将被重置。')) return;
+    const msgEl = document.getElementById('sessionMsg');
+    msgEl.textContent = '正在退出...';
+    await fetch('/_range/exit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) }).catch(() => {});
+    clearSession();
+    location.reload();
+  }
+
+  // ─── Session 面板 ───────────────────────────────────────────────────────────
+  function showSessionPanel(data) {
+    clearInterval(statusIntervalId);
+    document.getElementById('entryPanel').classList.add('hidden');
+    document.getElementById('sessionPanel').classList.add('visible');
+
+    if (data) {
+      document.getElementById('sVisitor').textContent  = `#${visitorNumber}`;
+      document.getElementById('sOccupied').textContent = `${data.occupied} / 10`;
+    } else {
+      document.getElementById('sVisitor').textContent = `#${visitorNumber}`;
+    }
+
+    // 倒计时
+    timerIntervalId = setInterval(updateTimer, 1000);
+    updateTimer();
+
+    // 心跳
+    heartbeatId = setInterval(() => {
+      fetch('/_range/heartbeat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
+        .then(r => r.json())
+        .then(d => {
+          if (!d.ok) {
+            clearSession();
+            document.getElementById('sessionMsg').textContent = '会话已失效，请重新进入';
+            setTimeout(() => location.reload(), 2000);
+          } else {
+            sessionEnd = Date.now() + d.remainingSec * 1000;
+          }
+        })
+        .catch(() => {});
+    }, HEARTBEAT_INTERVAL);
+  }
+
+  function showEntryPanel() {
+    document.getElementById('entryPanel').classList.remove('hidden');
+    document.getElementById('sessionPanel').classList.remove('visible');
+  }
+
+  function updateTimer() {
+    const remaining = Math.max(0, sessionEnd - Date.now());
+    const min = String(Math.floor(remaining / 60000)).padStart(2, '0');
+    const sec = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0');
+    const el  = document.getElementById('timerDisplay');
+    el.textContent = `${min}:${sec}`;
+    if (remaining < 5 * 60 * 1000) el.classList.add('urgent');
+    else el.classList.remove('urgent');
+    if (remaining === 0) {
+      clearInterval(timerIntervalId);
+      clearInterval(heartbeatId);
+      clearSession();
+      document.getElementById('sessionMsg').textContent = '会话已超时，请重新进入';
+      setTimeout(() => location.reload(), 2000);
+    }
+  }
+
+  function clearSession() {
+    clearInterval(timerIntervalId);
+    clearInterval(heartbeatId);
+    token = null;
+    sessionStorage.removeItem('range_session');
+  }
+
+  const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+
+  // 页面卸载时发送退出
+  window.addEventListener('beforeunload', () => {
+    if (token && !isRedirecting) navigator.sendBeacon('/_range/exit', JSON.stringify({ token }));
+  });
+
+  init();
+</script>
+</body>
+</html>

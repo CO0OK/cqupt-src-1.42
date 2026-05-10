@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { ShieldAlert, User as UserIcon, Fingerprint, Mail, Lock, Eye, EyeOff, X, CheckCircle } from 'lucide-react';
+import { User as UserIcon, Fingerprint, Mail, Lock, Eye, EyeOff, X, CheckCircle } from 'lucide-react';
 import SliderCaptcha from '../components/SliderCaptcha';
 import { motion, AnimatePresence } from 'motion/react';
 import { getApiErrorMessage } from '../utils/apiError';
 import { PASSWORD_POLICY_HINT, validatePasswordPolicyText } from '../utils/passwordPolicy';
 import PasswordStrengthBar from '../components/PasswordStrengthBar';
+import logoImg from '../CQUPT/CQUPT_01_logo_1024px.png';
 
 interface RegisterProps {
   onSwitchToLogin: () => void;
@@ -131,8 +132,8 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
 
       <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl p-8 animate-fade-in">
         <div className="flex flex-col items-center mb-8">
-          <div className="p-3 rounded-xl bg-primary-600 shadow-lg shadow-primary-600/20 mb-4">
-            <ShieldAlert className="w-8 h-8 text-white" />
+          <div>
+            <img src={logoImg} alt="Logo" className="w-25 h-25" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">CQUPT-SRC</h1>
           <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">新白帽子注册</p>

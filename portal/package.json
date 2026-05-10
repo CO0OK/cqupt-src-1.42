@@ -1,0 +1,11 @@
+{
+  "name": "cqupt-range-portal",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.mjs",
+  "dependencies": {
+    "express": "^4.21.0",
+    "http-proxy-middleware": "^3.0.3",
+    "pg": "^8.11.0"
+  }
+}

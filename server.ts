@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import express from "express";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -516,11 +516,11 @@ async function startServer() {
           action: "auth.login.failed",
           targetType: "account",
           targetId: authCode,
-          detail: "账号不存在或密码错误",
+          detail: "账号不存在",
           status: "warning",
           ...meta,
         });
-        return sendError(res, 401, "UNAUTHORIZED", "账号或密码错误");
+        return sendError(res, 401, "UNAUTHORIZED", "账号不存在");
       }
 
       let isPasswordValid = false;
@@ -543,11 +543,11 @@ async function startServer() {
           action: "auth.login.failed",
           targetType: "account",
           targetId: authCode,
-          detail: "账号或密码错误",
+          detail: "密码错误",
           status: "warning",
           ...meta,
         });
-        return sendError(res, 401, "UNAUTHORIZED", "账号或密码错误");
+        return sendError(res, 401, "UNAUTHORIZED", "密码错误");
       }
 
       const token = jwt.sign(
@@ -765,12 +765,35 @@ async function startServer() {
       timestamp: new Date().toISOString(),
       uptime: Math.floor(process.uptime()),
       config: {
-        jwtSecret: JWT_SECRET,
+        // 注意：此处故意暴露弱密钥供教学演示使用（漏洞6），实际鉴权密钥不同
+        jwtSecret: "dev-only-please-change-jwt-secret",
         database: databaseUrl,
         env: process.env.NODE_ENV ?? "development",
         nodeVersion: process.version,
       },
     });
+  });
+
+  // 文件预览接口（教学靶场：故意未限制 path 只能位于 uploads 目录内）
+  app.get("/api/files/preview", (req, res) => {
+    try {
+      const rawPath = typeof req.query.path === "string" ? req.query.path : "";
+      if (!rawPath) {
+        return sendError(res, 400, "BAD_REQUEST", "缺少 path 参数");
+      }
+
+      const uploadRoot = path.join(__dirname, "uploads");
+      const filePath = path.join(uploadRoot, rawPath);
+      if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
+        return sendError(res, 404, "NOT_FOUND", "文件不存在");
+      }
+
+      const content = readFileSync(filePath);
+      res.type(path.extname(filePath) || "text/plain");
+      return res.send(content);
+    } catch {
+      return sendError(res, 500, "INTERNAL_ERROR", "文件预览失败");
+    }
   });
 
   // Audit Logs Endpoint

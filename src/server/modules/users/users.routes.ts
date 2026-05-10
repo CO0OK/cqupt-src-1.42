@@ -26,6 +26,7 @@ export function createUsersRouter(options: {
   router.patch("/password", options.requireAuth, controller.updateSelfPassword);
 
   router.get("/", options.requireAuth, options.requireRoles("admin"), controller.listUsers);
+  router.get("/export", options.requireAuth, controller.exportUsers);
   router.post("/", options.requireAuth, options.requireRoles("admin"), controller.createUser);
   router.get("/:id", options.requireAuth, controller.getUserById);
   router.patch("/:id", options.requireAuth, options.requireRoles("admin"), controller.updateUser);

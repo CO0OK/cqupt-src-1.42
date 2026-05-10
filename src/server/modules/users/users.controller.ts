@@ -47,6 +47,36 @@ export function createUsersController(
     }
   };
 
+  const escapeCsvValue = (value: unknown): string => {
+    const text = String(value ?? "");
+    return `"${text.replace(/"/g, '""')}"`;
+  };
+
+  const exportUsers: express.RequestHandler = async (_req, res) => {
+    try {
+      const users = await service.listUsers();
+      const rows = [
+        ["id", "username", "email", "authCode", "role", "points", "status", "registrationDate"],
+        ...users.map((user) => [
+          user.id,
+          user.username,
+          user.email,
+          user.authCode,
+          user.role,
+          user.points,
+          user.status,
+          user.registrationDate,
+        ]),
+      ];
+      const csv = rows.map((row) => row.map(escapeCsvValue).join(",")).join("\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", "attachment; filename=\"users_export.csv\"");
+      return res.send(`\uFEFF${csv}`);
+    } catch {
+      return sendError(res, 500, "INTERNAL_ERROR", "导出用户失败");
+    }
+  };
+
   const createUser: express.RequestHandler = async (req, res) => {
     try {
       const authUser = getRequestAuthUser(req);
@@ -320,6 +350,7 @@ export function createUsersController(
   return {
     listLeaderboard,
     listUsers,
+    exportUsers,
     getUserById,
     createUser,
     updateUser,

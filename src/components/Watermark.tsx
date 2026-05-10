@@ -5,9 +5,23 @@ interface WatermarkProps {
   user: User | null;
 }
 
+function getRangeInfo(): { visitor: number; online: number; total: number } | null {
+  try {
+    const match = document.cookie.match(/(?:^|;\s*)range_info=([^;]+)/);
+    if (!match) return null;
+    const obj = JSON.parse(decodeURIComponent(match[1]));
+    if (typeof obj.v === 'number') return { visitor: obj.v, online: obj.t, total: obj.m };
+  } catch {}
+  return null;
+}
+
 function buildWatermarkLines(user: User | null): string[] {
-  if (!user) return ['蓝山工作室安全组考核用'];
-  return ['蓝山工作室安全组考核用', user.authCode, user.username];
+  const range = getRangeInfo();
+  const base = range
+    ? [`蓝山工作室安全组考核用`, `第 ${range.visitor} 位 · 在线 ${range.online}/${range.total}`]
+    : ['蓝山工作室安全组考核用'];
+  if (!user) return base;
+  return [...base, user.authCode, user.username];
 }
 
 function drawWatermark(canvas: HTMLCanvasElement, lines: string[]) {

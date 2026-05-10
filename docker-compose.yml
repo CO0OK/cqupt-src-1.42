@@ -1,19 +1,50 @@
+# CQUPT 安全组考核靶场 - Docker Compose
+
+x-app-defaults: &app-defaults
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - cqupt-network
+  deploy:
+    resources:
+      limits:
+        memory: 256m
+        cpus: "0.35"
+      reservations:
+        memory: 64m
+  environment: &app-env
+    NODE_ENV: production
+    PORT: "3000"
+    REDIS_URL: "redis://:${REDIS_PASSWORD:-redis123}@redis:6379"
+    JWT_SECRET: "${JWT_SECRET}"
+    SMTP_HOST: "${SMTP_HOST:-}"
+    SMTP_PORT: "${SMTP_PORT:-587}"
+    SMTP_SECURE: "${SMTP_SECURE:-false}"
+    SMTP_USER: "${SMTP_USER:-}"
+    SMTP_PASS: "${SMTP_PASS:-}"
+    SMTP_FROM: "${SMTP_FROM:-}"
+    GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+
 services:
-  # PostgreSQL 数据库
   postgres:
     image: postgres:16-alpine
-    container_name: cqupt-src-postgres
+    container_name: cqupt-range-postgres
     environment:
-      POSTGRES_DB: ${DB_NAME:-cqupt_src}
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres123}
+      POSTGRES_DB: postgres
+      POSTGRES_USER: "${DB_USER:-postgres}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-postgres123}"
       POSTGRES_INITDB_ARGS: '--encoding=UTF8 --locale=C'
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # 初始化 SQL 脚本（如需要）
-      # - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${DB_USER:-postgres}']
       interval: 10s
@@ -23,17 +54,14 @@ services:
       - cqupt-network
     restart: unless-stopped
 
-  # Redis 缓存（可选，用于邮箱验证码和会话）
   redis:
     image: redis:7-alpine
-    container_name: cqupt-src-redis
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis123}
+    container_name: cqupt-range-redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redis123} --appendonly yes
+    command: "redis-server --requirepass ${REDIS_PASSWORD:-redis123} --appendonly yes"
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -43,45 +71,101 @@ services:
       - cqupt-network
     restart: unless-stopped
 
-  # 应用程序
-  app:
+  portal:
     build:
-      context: .
+      context: ./portal
       dockerfile: Dockerfile
-    container_name: cqupt-src-app
+    container_name: cqupt-range-portal
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      PORT: ${PORT:-3000}
-      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/${DB_NAME:-cqupt_src}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-redis123}@redis:6379
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
-      SMTP_HOST: ${SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_USER: ${SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS}
-      SMTP_FROM: ${SMTP_FROM}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-    ports:
-      - "${PORT:-3000}:3000"
+      MAX_SLOTS: "10"
+      SESSION_TIMEOUT_MIN: "30"
+      HEARTBEAT_TIMEOUT_SEC: "45"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: "${DB_USER:-postgres}"
+      DB_PASSWORD: "${DB_PASSWORD:-postgres123}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      # 挂载 .env 文件以方便调试（可选）
-      - ./.env:/app/.env:ro
     networks:
       - cqupt-network
     restart: unless-stopped
-    # 若使用 nginx 反向代理，可注释掉此行
-    # command: sh -c "npx prisma migrate deploy && node dist/server.js"
 
-  # Nginx 反向代理
+  app-1:
+    <<: *app-defaults
+    container_name: cqupt-app-1
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_1"
+
+  app-2:
+    <<: *app-defaults
+    container_name: cqupt-app-2
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_2"
+
+  app-3:
+    <<: *app-defaults
+    container_name: cqupt-app-3
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_3"
+
+  app-4:
+    <<: *app-defaults
+    container_name: cqupt-app-4
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_4"
+
+  app-5:
+    <<: *app-defaults
+    container_name: cqupt-app-5
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_5"
+
+  app-6:
+    <<: *app-defaults
+    container_name: cqupt-app-6
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_6"
+
+  app-7:
+    <<: *app-defaults
+    container_name: cqupt-app-7
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_7"
+
+  app-8:
+    <<: *app-defaults
+    container_name: cqupt-app-8
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_8"
+
+  app-9:
+    <<: *app-defaults
+    container_name: cqupt-app-9
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_9"
+
+  app-10:
+    <<: *app-defaults
+    container_name: cqupt-app-10
+    environment:
+      <<: *app-env
+      DATABASE_URL: "postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres123}@postgres:5432/cqupt_slot_10"
+
   nginx:
     image: nginx:alpine
-    container_name: cqupt-src-nginx
+    container_name: cqupt-range-nginx
     ports:
       - "80:80"
       - "443:443"
@@ -90,15 +174,14 @@ services:
       - letsencrypt:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
     depends_on:
-      - app
+      - portal
     networks:
       - cqupt-network
     restart: unless-stopped
 
-  # Certbot：自动续期 Let's Encrypt 证书
   certbot:
     image: certbot/certbot:latest
-    container_name: cqupt-src-certbot
+    container_name: cqupt-range-certbot
     volumes:
       - letsencrypt:/etc/letsencrypt
       - certbot_webroot:/var/www/certbot
