@@ -4,7 +4,7 @@
  *   1. 管理最多 10 个靶场 Slot（基于独立 Docker 容器 + 独立 DB）
  *   2. 用户进入时重置对应 Slot 数据库（FROM TEMPLATE）并重启容器
  *   3. 校验 Cookie Session，将请求反代到对应 app-N:3000
- *   4. 心跳超时（默认 45s）自动释放 Slot 并重启容器
+ *   4. 心跳超时（默认 300s）自动释放 Slot 并重启容器
  */
 
 import express        from 'express';
@@ -18,8 +18,8 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const MAX_SLOTS             = parseInt(process.env.MAX_SLOTS             || '10');
-const SESSION_TIMEOUT_MS    = parseInt(process.env.SESSION_TIMEOUT_MIN   || '30') * 60 * 1000;
-const HEARTBEAT_TIMEOUT_MS  = parseInt(process.env.HEARTBEAT_TIMEOUT_SEC || '45') * 1000;
+const SESSION_TIMEOUT_MS    = parseInt(process.env.SESSION_TIMEOUT_MIN   || '120') * 60 * 1000;
+const HEARTBEAT_TIMEOUT_MS  = parseInt(process.env.HEARTBEAT_TIMEOUT_SEC || '300') * 1000;
 
 // ─── IP 限速（防止 /enter 接口被刷）────────────────────────────────────────────
 // 每个 IP 在 RATE_WINDOW_MS 内最多 RATE_MAX 次 /enter 请求
@@ -264,7 +264,8 @@ app.post('/_range/enter', async (req, res) => {
 });
 
 app.post('/_range/heartbeat', (req, res) => {
-  const { token } = req.body;
+  const cookies = parseCookies(req);
+  const token = req.body?.token || cookies.range_token;
   const slot = slots.find(s => s.token === token && s.status === 'occupied');
   if (!slot) return res.status(404).json({ error: 'NOT_FOUND' });
   slot.lastSeen = Date.now();

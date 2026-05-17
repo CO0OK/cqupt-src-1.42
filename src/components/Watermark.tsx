@@ -72,6 +72,22 @@ export default function Watermark({ user }: WatermarkProps) {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!getRangeInfo()) return undefined;
+
+    const sendHeartbeat = () => {
+      fetch('/_range/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }).catch(() => undefined);
+    };
+
+    sendHeartbeat();
+    const heartbeatId = window.setInterval(sendHeartbeat, 60_000);
+    return () => window.clearInterval(heartbeatId);
+  }, []);
+
   return (
     <div
       ref={divRef}

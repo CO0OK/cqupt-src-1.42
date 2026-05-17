@@ -78,8 +78,8 @@ services:
     container_name: cqupt-range-portal
     environment:
       MAX_SLOTS: "10"
-      SESSION_TIMEOUT_MIN: "30"
-      HEARTBEAT_TIMEOUT_SEC: "45"
+      SESSION_TIMEOUT_MIN: "120"
+      HEARTBEAT_TIMEOUT_SEC: "300"
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_USER: "${DB_USER:-postgres}"

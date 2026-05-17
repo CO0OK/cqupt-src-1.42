@@ -238,7 +238,7 @@
       <div><span class="label">在线人数：</span><span class="value" id="sOccupied">—</span></div>
       <div><span class="label">剩余时间：</span></div>
     </div>
-    <div class="timer" id="timerDisplay">30:00</div>
+    <div class="timer" id="timerDisplay">120:00</div>
     <button class="btn btn-exit" onclick="exitRange()">退 出 靶 场</button>
     <p class="status-msg" id="sessionMsg"></p>
   </div>
@@ -247,7 +247,7 @@
 <p class="footer">© 蓝山工作室安全组 · 考核专用环境 · 请勿共享账号</p>
 
 <script>
-  const HEARTBEAT_INTERVAL = 20_000;  // 20s（服务端超时 45s，留 2× 缓冲）
+  const HEARTBEAT_INTERVAL = 60_000;  // 60s（服务端超时 300s）
   const STATUS_POLL        = 5_000;   // 5s
 
   let token         = null;
@@ -421,7 +421,7 @@
     sessionStorage.removeItem('range_session');
   }
 
-  const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+  const SESSION_TIMEOUT_MS = 120 * 60 * 1000;
 
   // 页面卸载时发送退出
   window.addEventListener('beforeunload', () => {
