@@ -148,7 +148,7 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-slate-950 p-4 transition-colors duration-300">
+    <div className="min-h-screen flex flex-col items-center bg-gray-50 dark:bg-slate-950 transition-colors duration-300">
       <div className="absolute top-6 right-6">
         <button 
           onClick={toggleTheme}
@@ -158,7 +158,8 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
         </button>
       </div>
 
-      <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl p-8 animate-fade-in">
+      <div className="flex-1 flex items-center justify-center w-full p-4">
+        <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl p-8 animate-fade-in">
         <div className="flex flex-col items-center mb-8">
           <div >
             <img src={logoImg} alt="Logo" className="w-25 h-25" />
@@ -249,11 +250,11 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
             新白帽子？ <button onClick={onSwitchToRegister} className="text-primary-600 dark:text-primary-400 hover:underline font-semibold ml-1">申请账号</button>
           </p>
         </div>
-        <div className="mt-4 text-center">
-          <p className="text-xs text-gray-500 dark:text-slate-400">
-            <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">渝ICP备2026008425号</a>
-          </p>
-        </div>
+      </div>
+      <div className="w-full text-center py-4">
+        <p className="text-xs text-gray-500 dark:text-slate-400">
+          <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">渝ICP备2026008425号</a>
+        </p>
       </div>
       {showForgotModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
