@@ -292,6 +292,11 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
             已有账号？ <button onClick={onSwitchToLogin} className="text-primary-600 dark:text-primary-400 hover:underline font-semibold ml-1">立即登录</button>
           </p>
         </div>
+        <div className="mt-4 text-center">
+          <p className="text-xs text-gray-500 dark:text-slate-400">
+            <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">渝ICP备2026008425号</a>
+          </p>
+        </div>
       </div>
 
       {/* Agreement Modal */}

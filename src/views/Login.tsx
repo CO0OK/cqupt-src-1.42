@@ -249,6 +249,11 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
             新白帽子？ <button onClick={onSwitchToRegister} className="text-primary-600 dark:text-primary-400 hover:underline font-semibold ml-1">申请账号</button>
           </p>
         </div>
+        <div className="mt-4 text-center">
+          <p className="text-xs text-gray-500 dark:text-slate-400">
+            <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">渝ICP备2026008425号</a>
+          </p>
+        </div>
       </div>
       {showForgotModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
