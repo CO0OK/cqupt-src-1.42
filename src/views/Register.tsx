@@ -294,6 +294,7 @@ export default function Register({ onSwitchToLogin, isDarkMode, toggleTheme }: R
           </p>
         </div>
       </div>
+      </div>
       <div className="w-full text-center py-4">
         <p className="text-xs text-gray-500 dark:text-slate-400">
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">渝ICP备2026008425号</a>

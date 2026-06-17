@@ -160,102 +160,105 @@ export default function Login({ onLogin, onSwitchToRegister, isDarkMode, toggleT
 
       <div className="flex-1 flex items-center justify-center w-full p-4">
         <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl border border-gray-200 dark:border-slate-800 shadow-xl p-8 animate-fade-in">
-        <div className="flex flex-col items-center mb-8">
-          <div >
-            <img src={logoImg} alt="Logo" className="w-25 h-25" />
+          <div className="flex flex-col items-center mb-8">
+            <div>
+              <img src={logoImg} alt="Logo" className="w-25 h-25" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">CQUPT-SRC</h1>
+            <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">安全响应中心门户</p>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">CQUPT-SRC</h1>
-          <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">安全响应中心门户</p>
-        </div>
 
-        {error && (
-          <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm text-center">
-            {error}
-          </div>
-        )}
+          {error && (
+            <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm text-center">
+              {error}
+            </div>
+          )}
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">统一认证码</label>
-            <div className="relative group">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 group-focus-within:text-primary-600 transition-colors">
-                <Fingerprint className="w-5 h-5" />
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">统一认证码</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 group-focus-within:text-primary-600 transition-colors">
+                  <Fingerprint className="w-5 h-5" />
+                </div>
+                <input
+                  type="text"
+                  required
+                  maxLength={7}
+                  value={authCode}
+                  onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, '').slice(0, 7))}
+                  placeholder="请输入7位统一认证码"
+                  className="w-full pl-11 pr-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+                />
               </div>
-              <input 
-                type="text" 
-                required 
-                maxLength={7}
-                value={authCode}
-                onChange={(e) => setAuthCode(e.target.value.replace(/\D/g, '').slice(0, 7))}
-                placeholder="请输入7位统一认证码" 
-                className="w-full pl-11 pr-4 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
-              />
             </div>
-          </div>
 
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">密码</label>
-            <div className="relative group">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 group-focus-within:text-primary-600 transition-colors">
-                <Lock className="w-5 h-5" />
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700 dark:text-slate-300 ml-0.5">密码</label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400 group-focus-within:text-primary-600 transition-colors">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-11 pr-12 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
               </div>
-              <input 
-                type={showPassword ? "text" : "password"} 
-                required 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••" 
-                className="w-full pl-11 pr-12 py-2.5 bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-primary-500 outline-none transition-all dark:text-white text-sm"
-              />
-              <button 
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 transition-colors"
-              >
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
+              <div className="text-right mt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotError('');
+                    setForgotNotice('');
+                    setShowForgotModal(true);
+                  }}
+                  className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
+                >
+                  忘记密码？
+                </button>
+              </div>
             </div>
-            <div className="text-right mt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setForgotError('');
-                  setForgotNotice('');
-                  setShowForgotModal(true);
-                }}
-                className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
-              >
-                忘记密码？
-              </button>
-            </div>
+
+            <SliderCaptcha onVerify={setIsVerified} isDarkMode={isDarkMode} />
+
+            <button
+              type="submit"
+              disabled={!isVerified}
+              className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all duration-300 ${
+                isVerified
+                  ? 'bg-primary-600 hover:bg-primary-700 text-white shadow-primary-600/20 hover:shadow-primary-600/40 active:scale-[0.98]'
+                  : 'bg-gray-200 dark:bg-slate-800 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              登录平台
+            </button>
+          </form>
+
+          <div className="mt-8 pt-6 border-t border-gray-100 dark:border-slate-800 text-center">
+            <p className="text-sm text-gray-500 dark:text-slate-400">
+              新白帽子？ <button onClick={onSwitchToRegister} className="text-primary-600 dark:text-primary-400 hover:underline font-semibold ml-1">申请账号</button>
+            </p>
           </div>
-
-          <SliderCaptcha onVerify={setIsVerified} isDarkMode={isDarkMode} />
-
-          <button 
-            type="submit" 
-            disabled={!isVerified}
-            className={`w-full py-3 font-bold rounded-xl shadow-lg transition-all duration-300 ${
-              isVerified 
-                ? 'bg-primary-600 hover:bg-primary-700 text-white shadow-primary-600/20 hover:shadow-primary-600/40 active:scale-[0.98]' 
-                : 'bg-gray-200 dark:bg-slate-800 text-gray-400 cursor-not-allowed'
-            }`}
-          >
-            登录平台
-          </button>
-        </form>
-
-        <div className="mt-8 pt-6 border-t border-gray-100 dark:border-slate-800 text-center">
-          <p className="text-sm text-gray-500 dark:text-slate-400">
-            新白帽子？ <button onClick={onSwitchToRegister} className="text-primary-600 dark:text-primary-400 hover:underline font-semibold ml-1">申请账号</button>
-          </p>
         </div>
       </div>
+
       <div className="w-full text-center py-4">
         <p className="text-xs text-gray-500 dark:text-slate-400">
           <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">渝ICP备2026008425号</a>
         </p>
       </div>
+
       {showForgotModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-md rounded-2xl border border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-2xl space-y-4">
